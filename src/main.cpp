@@ -3,6 +3,29 @@
 #include <DemBones/DemBonesExt.h>
 #include <DemBones/MatBlocks.h>
 #include <Python.h>
+#include <maya/MAnimControl.h>
+#include <maya/MColor.h>
+#include <maya/MColorArray.h>
+#include <maya/MDagPath.h>
+#include <maya/MDagPathArray.h>
+#include <maya/MEulerRotation.h>
+#include <maya/MFnDagNode.h>
+#include <maya/MFnDependencyNode.h>
+#include <maya/MFnMesh.h>
+#include <maya/MFnSkinCluster.h>
+#include <maya/MGlobal.h>
+#include <maya/MItDependencyGraph.h>
+#include <maya/MMatrix.h>
+#include <maya/MObject.h>
+#include <maya/MPlug.h>
+#include <maya/MPoint.h>
+#include <maya/MPointArray.h>
+#include <maya/MQuaternion.h>
+#include <maya/MSelectionList.h>
+#include <maya/MString.h>
+#include <maya/MTime.h>
+#include <maya/MTransformationMatrix.h>
+#include <maya/MTypes.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -10,23 +33,90 @@
 #include <iostream>
 #include <map>
 #include <vector>
-
-#include "utils.h"
+#include <string>
+#include <array>
 
 namespace py = pybind11;
-using namespace std;
-using namespace Eigen;
-using namespace Dem;
 
-class DemBonesModel : public DemBonesExt<double, float> {
+#define LOG(str)     \
+    {                \
+        cout << str; \
+    }
+
+#define CHECK_MSTATUS_AND_THROW(status)                                          \
+    {                                                                            \
+        if (status.error()) throw std::exception(status.errorString().asChar()); \
+    }
+
+MDagPath toMDagPath(std::string& name, bool shape) {
+    MStatus status;
+    MDagPath dag;
+    MSelectionList selection;
+
+    status = selection.add(MString(name.c_str()));
+    CHECK_MSTATUS_AND_THROW(status);
+    status = selection.getDagPath(0, dag, MObject::kNullObj);
+    CHECK_MSTATUS_AND_THROW(status);
+
+    if (shape) {
+        status = dag.extendToShape();
+        CHECK_MSTATUS_AND_THROW(status);
+    }
+
+    return dag;
+};
+
+Eigen::Matrix4d toMatrix4D(MMatrix& source) {
+    Eigen::Matrix4d target;
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            target(j, i) = source(i, j);
+        }
+    }
+
+    return target;
+};
+
+MMatrix toMMatrix(
+    MVector& translate, MVector& rotate, MTransformationMatrix::RotationOrder rotateOrder
+) {
+    MStatus status;
+    MTransformationMatrix matrix;
+
+    status = matrix.setTranslation(translate, MSpace::kObject);
+    CHECK_MSTATUS_AND_THROW(status);
+
+    const double rotation[3] = {rotate.x, rotate.y, rotate.z};
+    status = matrix.setRotation(rotation, rotateOrder, MSpace::kObject);
+    CHECK_MSTATUS_AND_THROW(status);
+    return matrix.asMatrix();
+};
+
+std::array<double, 16> toMatrixArray(MMatrix matrix) {
+    std::array<double, 16> matrixArray;
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            matrixArray[i * 4 + j] = matrix(i, j);
+        }
+    }
+
+    return matrixArray;
+};
+
+double toGrayScale(const MColor& c) { return 0.2989 * c.r + 0.5870 * c.g + 0.1140 * c.b; }
+
+
+class DemBonesModel : public Dem::DemBonesExt<double, float> {
    public:
     int sF = 1001;
     int eF = 1010;
-    vector<string> bonesMaya;
-    vector<double> weightsMaya;
-    map<string, MMatrix> bindMatricesMaya;
-    map<string, map<int, MMatrix>> animMatricesMaya;
-    map<string, MTransformationMatrix::RotationOrder> rotOrderMaya;
+    std::vector<std::string> bonesMaya;
+    std::vector<double> weightsMaya;
+    std::map<std::string, MMatrix> bindMatricesMaya;
+    std::map<std::string, std::map<int, MMatrix>> animMatricesMaya;
+    std::map<std::string, MTransformationMatrix::RotationOrder> rotOrderMaya;
 
     double tolerance;
     int patience;
@@ -71,14 +161,16 @@ class DemBonesModel : public DemBonesExt<double, float> {
     bool cbWeightsIterEnd() { return false; }
 
     void extractSource(MDagPath& dag, MFnMesh& mesh) {
-        MatrixXd wd(0, 0);
+        Eigen::MatrixXd wd(0, 0);
         MIntArray indices;
         MDoubleArray weights;
         MDagPath boneParentMaya;
         MDagPathArray bonesMaya;
-        map<string, MatrixXd, less<string>, aligned_allocator<pair<const string, MatrixXd>>> mT;
-        map<string, VectorXd, less<string>, aligned_allocator<pair<const string, VectorXd>>> wT;
-        map<string, Matrix4d, less<string>, aligned_allocator<pair<const string, Matrix4d>>>
+        std::map<std::string, Eigen::MatrixXd, std::less<std::string>, Eigen::aligned_allocator<std::pair<const std::string, Eigen::MatrixXd>>>
+            mT;
+        std::map<std::string, Eigen::VectorXd, std::less<std::string>, Eigen::aligned_allocator<std::pair<const std::string, Eigen::VectorXd>>>
+            wT;
+        std::map<std::string, Eigen::Matrix4d, std::less<std::string>, Eigen::aligned_allocator<std::pair<const std::string, Eigen::Matrix4d>>>
             bindMatrices;
         bool hasKeyFrame = false;
 
@@ -110,8 +202,9 @@ class DemBonesModel : public DemBonesExt<double, float> {
         }
 
         // update model: weights and skeleton
+        MObject dobj = dag.node();
         MItDependencyGraph graphIter(
-            dag.node(), MFn::kSkinClusterFilter, MItDependencyGraph::kUpstream
+            dobj, MFn::kSkinClusterFilter, MItDependencyGraph::kUpstream
         );
         MObject rootNode = graphIter.currentItem(&status);
 
@@ -124,7 +217,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
             // get bones names
             boneName.resize(nB);
             for (int j = 0; j < nB; j++) {
-                string name = bonesMaya[j].partialPathName().asUTF8();
+                std::string name = bonesMaya[j].partialPathName().asUTF8();
                 boneName[j] = name;
                 boneIndex[name] = j;
             }
@@ -134,7 +227,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
                 status = skinCluster.getWeights(dag, MObject::kNullObj, j, weights);
                 CHECK_MSTATUS_AND_THROW(status);
 
-                wT[boneName[j]] = VectorXd::Zero(nV);
+                wT[boneName[j]] = Eigen::VectorXd::Zero(nV);
                 for (int k = 0; k < nV; k++) {
                     wT[boneName[j]](k) = weights[k];
                 }
@@ -147,11 +240,11 @@ class DemBonesModel : public DemBonesExt<double, float> {
         rotOrder.resize(nS * 3, nB);
         orient.resize(nS * 3, nB);
         lockM.resize(nB);
-        lockW = VectorXd::Zero(nV);
+        lockW = Eigen::VectorXd::Zero(nV);
 
         // update model: weights
         if (wT.size() != 0) {
-            wd = MatrixXd::Zero(nB, nV);
+            wd = Eigen::MatrixXd::Zero(nB, nV);
             for (int j = 0; j < nB; j++) {
                 wd.row(j) = wT[boneName[j]].transpose();
             }
@@ -165,14 +258,14 @@ class DemBonesModel : public DemBonesExt<double, float> {
             CHECK_MSTATUS_AND_THROW(status);
 
             for (int c = 0; c < (int)colours.length(); c++) {
-                lockW(c) = Conversion::toGrayScale(colours[c]);
+                lockW(c) = toGrayScale(colours[c]);
             }
         }
 
         // update model: skeleton
         for (int j = 0; j < nB; j++) {
             // get name
-            string name = boneName[j];
+            std::string name = boneName[j];
 
             // get parent
             MObject boneObj = bonesMaya[j].node();
@@ -184,7 +277,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
                 status = MDagPath::getAPathTo(boneParentObj, boneParentMaya);
                 CHECK_MSTATUS_AND_THROW(status);
 
-                string parentName = boneParentMaya.partialPathName().asUTF8();
+                std::string parentName = boneParentMaya.partialPathName().asUTF8();
                 if (boneIndex.find(parentName) == boneIndex.end()) {
                     parent(j) = -1;
                 } else {
@@ -196,7 +289,8 @@ class DemBonesModel : public DemBonesExt<double, float> {
 
             // get bind matrix
             mT[name].resize(nF * 4, 4);
-            Matrix4d bindMatrix = Conversion::toMatrix4D(bonesMaya[j].inclusiveMatrix());
+            MMatrix tmpIM = bonesMaya[j].inclusiveMatrix();
+            Eigen::Matrix4d bindMatrix = toMatrix4D(tmpIM);
             bind.blk4(0, j) = bindMatrix;
             bindMatrices[name] = bindMatrix;
 
@@ -207,32 +301,32 @@ class DemBonesModel : public DemBonesExt<double, float> {
             int rotateOrder = rotateOrderPlug.asInt();
             switch (rotateOrder) {
                 case 0: {
-                    rotOrder.vec3(0, j) = Vector3i(0, 1, 2);
+                    rotOrder.vec3(0, j) = Eigen::Vector3i(0, 1, 2);
                     rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kXYZ;
                     break;
                 }
                 case 1: {
-                    rotOrder.vec3(0, j) = Vector3i(1, 2, 0);
+                    rotOrder.vec3(0, j) = Eigen::Vector3i(1, 2, 0);
                     rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kYZX;
                     break;
                 }
                 case 2: {
-                    rotOrder.vec3(0, j) = Vector3i(2, 0, 1);
+                    rotOrder.vec3(0, j) = Eigen::Vector3i(2, 0, 1);
                     rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kZXY;
                     break;
                 }
                 case 3: {
-                    rotOrder.vec3(0, j) = Vector3i(0, 2, 1);
+                    rotOrder.vec3(0, j) = Eigen::Vector3i(0, 2, 1);
                     rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kXZY;
                     break;
                 }
                 case 4: {
-                    rotOrder.vec3(0, j) = Vector3i(1, 0, 2);
+                    rotOrder.vec3(0, j) = Eigen::Vector3i(1, 0, 2);
                     rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kYXZ;
                     break;
                 }
                 case 5: {
-                    rotOrder.vec3(0, j) = Vector3i(2, 1, 0);
+                    rotOrder.vec3(0, j) = Eigen::Vector3i(2, 1, 0);
                     rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kZYX;
                     break;
                 }
@@ -245,17 +339,18 @@ class DemBonesModel : public DemBonesExt<double, float> {
             double jointOrientX = jointOrientPlug.child(0).asMAngle().asDegrees();
             double jointOrientY = jointOrientPlug.child(1).asMAngle().asDegrees();
             double jointOrientZ = jointOrientPlug.child(2).asMAngle().asDegrees();
-            orient.vec3(0, j) = Vector3d(jointOrientX, jointOrientY, jointOrientZ);
+            orient.vec3(0, j) = Eigen::Vector3d(jointOrientX, jointOrientY, jointOrientZ);
 
             // get pre multiply inverse
             if (!boneParentObj.isNull() && parent(j) == -1) {
                 status = MDagPath::getAPathTo(boneParentObj, boneParentMaya);
                 CHECK_MSTATUS_AND_THROW(status);
 
-                Matrix4d gp = Conversion::toMatrix4D(boneParentMaya.inclusiveMatrix());
+                MMatrix tmpIM = boneParentMaya.inclusiveMatrix();
+                Eigen::Matrix4d gp = toMatrix4D(tmpIM);
                 preMulInv.blk4(0, j) = gp.inverse();
             } else {
-                preMulInv.blk4(0, j) = Matrix4d::Identity();
+                preMulInv.blk4(0, j) = Eigen::Matrix4d::Identity();
             }
 
             // get dem lock
@@ -276,10 +371,11 @@ class DemBonesModel : public DemBonesExt<double, float> {
 
             for (int j = 0; j < nB; j++) {
                 // get name
-                string name = boneName[j];
+                std::string name = boneName[j];
 
                 // set matrix
-                Matrix4d matrix = Conversion::toMatrix4D(bonesMaya[j].inclusiveMatrix());
+                MMatrix tmpIM = bonesMaya[j].inclusiveMatrix();
+                Eigen::Matrix4d matrix = toMatrix4D(tmpIM);
                 mT[name].blk4(num, 0) = matrix * bindMatrices[name].inverse();
             }
         }
@@ -290,7 +386,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
         // update model: animation state
         MString transformAttributes[9] = {"tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz"};
         for (int j = 0; j < nB; j++) {
-            string nj = boneName[j];
+            std::string nj = boneName[j];
 
             for (int k = 0; k < 9; k++) {
                 MFnDependencyNode node(bonesMaya[j].node(), &status);
@@ -355,7 +451,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
         LOG("extracted target" << endl);
     }
 
-    void compute(string& source, string& target, int& startFrame, int& endFrame) {
+    void compute(std::string& source, std::string& target, int& startFrame, int& endFrame) {
         // log parameters
         LOG("parameters" << endl);
         LOG("  source                   = " << source << endl);
@@ -379,8 +475,8 @@ class DemBonesModel : public DemBonesExt<double, float> {
         np = patience;
 
         // get geometry
-        MDagPath sourcePath = Conversion::toMDagPath(source, true);
-        MDagPath targetPath = Conversion::toMDagPath(target, true);
+        MDagPath sourcePath = toMDagPath(source, true);
+        MDagPath targetPath = toMDagPath(target, true);
 
         MFnMesh sourceMeshFn(sourcePath, &status);
         CHECK_MSTATUS_AND_THROW(status);
@@ -424,16 +520,16 @@ class DemBonesModel : public DemBonesExt<double, float> {
         DemBonesExt<double, float>::compute();
 
         // compute transformations + weights
-        VectorXd tVal, rVal;
-        MatrixXd lr, lt, gb, lbr, lbt;
+        Eigen::VectorXd tVal, rVal;
+        Eigen::MatrixXd lr, lt, gb, lbr, lbt;
         computeRTB(0, lr, lt, gb, lbr, lbt, false);
 
         for (int j = 0; j < nB; j++) {
-            string name = boneName[j];
+            std::string name = boneName[j];
             bonesMaya.push_back(name);
             MVector translate = MVector(lbt(0, j), lbt(1, j), lbt(2, j));
             MVector rotate = MVector(lbr(0, j), lbr(1, j), lbr(2, j));
-            bindMatricesMaya[name] = Conversion::toMMatrix(translate, rotate, rotOrderMaya[name]);
+            bindMatricesMaya[name] = toMMatrix(translate, rotate, rotOrderMaya[name]);
 
             tVal = lt.col(j);
             rVal = lr.col(j);
@@ -444,7 +540,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
                     MVector(tVal(num * 3), tVal((num * 3) + 1), tVal((num * 3) + 2));
                 MVector rotate = MVector(rVal(num * 3), rVal((num * 3) + 1), rVal((num * 3) + 2));
                 animMatricesMaya[name][k] =
-                    Conversion::toMMatrix(translate, rotate, rotOrderMaya[name]);
+                    toMMatrix(translate, rotate, rotOrderMaya[name]);
             }
         }
 
@@ -460,15 +556,15 @@ class DemBonesModel : public DemBonesExt<double, float> {
         anim.setCurrentTime(time);
     }
 
-    array<double, 16> bindMatrix(string& bone) {
+    std::array<double, 16> bindMatrix(std::string& bone) {
         if (bindMatricesMaya.find(bone) == bindMatricesMaya.end()) {
             throw std::exception("Provided influence is not valid.");
         }
 
-        return Conversion::toMatrixArray(bindMatricesMaya[bone]);
+        return toMatrixArray(bindMatricesMaya[bone]);
     }
 
-    array<double, 16> animMatrix(string& bone, int& frame) {
+    std::array<double, 16> animMatrix(std::string& bone, int& frame) {
         if (animMatricesMaya.find(bone) == animMatricesMaya.end()) {
             throw std::exception("Provided bone is not valid.");
         }
@@ -476,7 +572,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
             throw std::exception("Provided frame is not valid.");
         }
 
-        return Conversion::toMatrixArray(animMatricesMaya[bone][frame]);
+        return toMatrixArray(animMatricesMaya[bone][frame]);
     }
 
     void clear() {
@@ -493,7 +589,7 @@ class DemBonesModel : public DemBonesExt<double, float> {
     MTime time;
     MAnimControl anim;
     MPointArray points;
-    map<string, int> boneIndex;
+    std::map<std::string, int> boneIndex;
 } model;
 
 PYBIND11_MODULE(_core, m) {
