@@ -1,9 +1,0 @@
-[wrap-git]
-
-url = https://github.com/electronicarts/dem-bones.git
-revision = 09b899b4158ebb59c0c7a7f58e996eef52be77e3
-depth = 1
-method = cmake
-
-[provide]
-dembones = dembones_dep

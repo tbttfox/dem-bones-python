@@ -10,11 +10,13 @@ SET BUILDTYPE=release
 SET BUILDDIR=mayabuild_%BUILDTYPE%_%MAYA_VERSION%_%BACKEND%
 
 if not exist %BUILDDIR%\ (
-    meson setup %BUILDDIR% -Dmaya:maya_version=%MAYA_VERSION% --buildtype %BUILDTYPE% --vsenv --backend %BACKEND%
+    meson setup %BUILDDIR% --buildtype %BUILDTYPE% --vsenv --backend %BACKEND%
 )
 
 if exist %BUILDDIR%\ (
     meson compile -C %BUILDDIR%
+    REM Make sure to skip subprojects with eigen
+    REM otherwise it'll try to install its headers
     meson install --skip-subprojects -C %BUILDDIR%
 )
 

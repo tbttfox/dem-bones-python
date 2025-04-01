@@ -1,0 +1,3 @@
+[submodule "extern/dem-bones"]
+	path = extern/dem-bones
+	url = https://github.com/electronicarts/dem-bones.git
