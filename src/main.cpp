@@ -30,11 +30,11 @@
 #include <pybind11/stl.h>
 
 #include <Eigen/Dense>
+#include <array>
 #include <iostream>
 #include <map>
-#include <vector>
 #include <string>
-#include <array>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -88,7 +88,8 @@ MMatrix toMMatrix(
     CHECK_MSTATUS_AND_THROW(status);
 
     const double rotation[3] = {rotate.x, rotate.y, rotate.z};
-    status = matrix.setRotation(rotation, rotateOrder, MSpace::kObject);
+    //status = matrix.setRotation(rotation, rotateOrder, MSpace::kObject);
+    status = matrix.setRotation(rotation, rotateOrder);
     CHECK_MSTATUS_AND_THROW(status);
     return matrix.asMatrix();
 };
@@ -106,7 +107,6 @@ std::array<double, 16> toMatrixArray(MMatrix matrix) {
 };
 
 double toGrayScale(const MColor& c) { return 0.2989 * c.r + 0.5870 * c.g + 0.1140 * c.b; }
-
 
 class DemBonesModel : public Dem::DemBonesExt<double, float> {
    public:
@@ -166,11 +166,17 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
         MDoubleArray weights;
         MDagPath boneParentMaya;
         MDagPathArray bonesMaya;
-        std::map<std::string, Eigen::MatrixXd, std::less<std::string>, Eigen::aligned_allocator<std::pair<const std::string, Eigen::MatrixXd>>>
+        std::map<
+            std::string, Eigen::MatrixXd, std::less<std::string>,
+            Eigen::aligned_allocator<std::pair<const std::string, Eigen::MatrixXd>>>
             mT;
-        std::map<std::string, Eigen::VectorXd, std::less<std::string>, Eigen::aligned_allocator<std::pair<const std::string, Eigen::VectorXd>>>
+        std::map<
+            std::string, Eigen::VectorXd, std::less<std::string>,
+            Eigen::aligned_allocator<std::pair<const std::string, Eigen::VectorXd>>>
             wT;
-        std::map<std::string, Eigen::Matrix4d, std::less<std::string>, Eigen::aligned_allocator<std::pair<const std::string, Eigen::Matrix4d>>>
+        std::map<
+            std::string, Eigen::Matrix4d, std::less<std::string>,
+            Eigen::aligned_allocator<std::pair<const std::string, Eigen::Matrix4d>>>
             bindMatrices;
         bool hasKeyFrame = false;
 
@@ -203,9 +209,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
 
         // update model: weights and skeleton
         MObject dobj = dag.node();
-        MItDependencyGraph graphIter(
-            dobj, MFn::kSkinClusterFilter, MItDependencyGraph::kUpstream
-        );
+        MItDependencyGraph graphIter(dobj, MFn::kSkinClusterFilter, MItDependencyGraph::kUpstream);
         MObject rootNode = graphIter.currentItem(&status);
 
         if (MS::kSuccess == status) {
@@ -295,7 +299,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
             bindMatrices[name] = bindMatrix;
 
             // get rotation order
-            MPlug rotateOrderPlug = boneDagFn.findPlug("rotateOrder", &status);
+            MPlug rotateOrderPlug = boneDagFn.findPlug("rotateOrder", true, &status);
             CHECK_MSTATUS_AND_THROW(status);
 
             int rotateOrder = rotateOrderPlug.asInt();
@@ -333,7 +337,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
             }
 
             // get joint orient
-            MPlug jointOrientPlug = boneDagFn.findPlug("jointOrient", &status);
+            MPlug jointOrientPlug = boneDagFn.findPlug("jointOrient", true, &status);
             CHECK_MSTATUS_AND_THROW(status);
 
             double jointOrientX = jointOrientPlug.child(0).asMAngle().asDegrees();
@@ -354,7 +358,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
             }
 
             // get dem lock
-            MPlug demLockPlug = boneDagFn.findPlug("demLock", &status);
+            MPlug demLockPlug = boneDagFn.findPlug("demLock", true, &status);
             if (MS::kSuccess == status) {
                 lockM(j) = demLockPlug.asInt();
             } else {
@@ -392,7 +396,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
                 MFnDependencyNode node(bonesMaya[j].node(), &status);
                 CHECK_MSTATUS_AND_THROW(status);
 
-                MPlug plug = node.findPlug(transformAttributes[k], &status);
+                MPlug plug = node.findPlug(transformAttributes[k], true, &status);
                 CHECK_MSTATUS_AND_THROW(status);
 
                 if (plug.isDestination()) {
@@ -539,8 +543,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
                 MVector translate =
                     MVector(tVal(num * 3), tVal((num * 3) + 1), tVal((num * 3) + 2));
                 MVector rotate = MVector(rVal(num * 3), rVal((num * 3) + 1), rVal((num * 3) + 2));
-                animMatricesMaya[name][k] =
-                    toMMatrix(translate, rotate, rotOrderMaya[name]);
+                animMatricesMaya[name][k] = toMMatrix(translate, rotate, rotOrderMaya[name]);
             }
         }
 
