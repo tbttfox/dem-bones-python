@@ -38,9 +38,9 @@
 
 namespace py = pybind11;
 
-#define LOG(str)     \
-    {                \
-        cout << str; \
+#define LOG(str)             \
+    {                        \
+        cout << str << endl; \
     }
 
 #define CHECK_MSTATUS_AND_THROW(status)                                          \
@@ -88,7 +88,7 @@ MMatrix toMMatrix(
     CHECK_MSTATUS_AND_THROW(status);
 
     const double rotation[3] = {rotate.x, rotate.y, rotate.z};
-    //status = matrix.setRotation(rotation, rotateOrder, MSpace::kObject);
+    // status = matrix.setRotation(rotation, rotateOrder, MSpace::kObject);
     status = matrix.setRotation(rotation, rotateOrder);
     CHECK_MSTATUS_AND_THROW(status);
     return matrix.asMatrix();
@@ -126,15 +126,15 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
         clear();
     }
 
-    void cbIterBegin() { LOG("  iteration #" << iter << endl); }
+    void cbIterBegin() { LOG("  iteration #" << iter); }
 
     bool cbIterEnd() {
         double err = rmse();
-        LOG("    rmse = " << err << endl);
+        LOG("    rmse = " << err);
         if ((err < prevErr * (1 + weightEps)) && ((prevErr - err) < tolerance * prevErr)) {
             np--;
             if (np == 0) {
-                LOG("  convergence is reached" << endl);
+                LOG("  convergence is reached");
                 return true;
             }
         } else {
@@ -150,11 +150,11 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
 
     void cbWeightsBegin() {}
 
-    void cbWeightsEnd() { LOG("    updated weights..." << endl); }
+    void cbWeightsEnd() { LOG("    updated weights..."); }
 
     void cbTranformationsBegin() {}
 
-    void cbTransformationsEnd() { LOG("    updated transforms..." << endl); }
+    void cbTransformationsEnd() { LOG("    updated transforms..."); }
 
     bool cbTransformationsIterEnd() { return false; }
 
@@ -162,10 +162,6 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
 
     void extractSource(MDagPath& dag, MFnMesh& mesh) {
         Eigen::MatrixXd wd(0, 0);
-        MIntArray indices;
-        MDoubleArray weights;
-        MDagPath boneParentMaya;
-        MDagPathArray bonesMaya;
         std::map<
             std::string, Eigen::MatrixXd, std::less<std::string>,
             Eigen::aligned_allocator<std::pair<const std::string, Eigen::MatrixXd>>>
@@ -178,6 +174,11 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
             std::string, Eigen::Matrix4d, std::less<std::string>,
             Eigen::aligned_allocator<std::pair<const std::string, Eigen::Matrix4d>>>
             bindMatrices;
+
+        MIntArray indices;
+        MDoubleArray weights;
+        MDagPath boneParentMaya;
+        MDagPathArray bonesMaya;
         bool hasKeyFrame = false;
 
         time.setValue(sF);
@@ -413,16 +414,16 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
         }
 
         // report
-        LOG("extracted source" << endl);
-        LOG("  " << nV << " vertices" << endl);
+        LOG("extracted source");
+        LOG("  " << nV << " vertices");
         if (nB != 0) {
-            LOG("  " << nB << " joints" << endl);
+            LOG("  " << nB << " joints");
         }
         if (hasKeyFrame) {
-            LOG("  keyframes found" << endl);
+            LOG("  keyframes found");
         }
         if (w.size() != 0) {
-            LOG("  skinning found" << endl);
+            LOG("  skinning found");
         }
     }
 
@@ -452,27 +453,27 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
             }
         }
 
-        LOG("extracted target" << endl);
+        LOG("extracted target");
     }
 
     void compute(std::string& source, std::string& target, int& startFrame, int& endFrame) {
         // log parameters
-        LOG("parameters" << endl);
-        LOG("  source                   = " << source << endl);
-        LOG("  target                   = " << target << endl);
-        LOG("  start_frame              = " << startFrame << endl);
-        LOG("  end_frame                = " << endFrame << endl);
-        LOG("  num_iterations           = " << nIters << endl);
-        LOG("  patience                 = " << patience << endl);
-        LOG("  tolerance                = " << tolerance << endl);
-        LOG("  num_transform_iterations = " << nTransIters << endl);
-        LOG("  num_weight_iterations    = " << nWeightsIters << endl);
-        LOG("  translation_affine       = " << transAffine << endl);
-        LOG("  translation_affine_norm  = " << transAffineNorm << endl);
-        LOG("  max_influences           = " << nnz << endl);
-        LOG("  weights_smooth           = " << weightsSmooth << endl);
-        LOG("  weights_smooth_step      = " << weightsSmoothStep << endl);
-        LOG("  weights_epsilon          = " << weightEps << endl);
+        LOG("parameters");
+        LOG("  source                   = " << source);
+        LOG("  target                   = " << target);
+        LOG("  start_frame              = " << startFrame);
+        LOG("  end_frame                = " << endFrame);
+        LOG("  num_iterations           = " << nIters);
+        LOG("  patience                 = " << patience);
+        LOG("  tolerance                = " << tolerance);
+        LOG("  num_transform_iterations = " << nTransIters);
+        LOG("  num_weight_iterations    = " << nWeightsIters);
+        LOG("  translation_affine       = " << transAffine);
+        LOG("  translation_affine_norm  = " << transAffineNorm);
+        LOG("  max_influences           = " << nnz);
+        LOG("  weights_smooth           = " << weightsSmooth);
+        LOG("  weights_smooth_step      = " << weightsSmoothStep);
+        LOG("  weights_epsilon          = " << weightEps);
 
         // variables
         prevErr = -1;
@@ -520,7 +521,7 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
         }
 
         // compute model
-        LOG("computing" << endl);
+        LOG("computing");
         DemBonesExt<double, float>::compute();
 
         // compute transformations + weights

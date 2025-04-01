@@ -1,12 +1,11 @@
-project('dem-bones-python', 'cpp', default_options: ['cpp_std=c++20'])
+project('dem-bones-python', 'cpp', default_options: ['cpp_std=c++20'], meson_version : '1.7.0')
 
 source_files = files([
-  'src/py_dem_bones.cpp',
-  'src/py_dem_bones_ext.cpp',
-  'src/py_dem_bones_module.cpp',
+  'src/main.cpp',
 ])
 
-# DemBones has a pretty annoying cmake setup
+# DemBones cmake is only for its command line tool
+# and that has all kinds of extra annoying dependencies
 # so its easier to just use a git submodule and add the includes directly
 includes = include_directories([
   'src',
@@ -16,6 +15,7 @@ includes = include_directories([
 eigen_dep = dependency('eigen3')
 pybind_dep = dependency('pybind11')
 py_dep = dependency('python3')
+maya_dep = dependency('maya')
 
 
 os_name = build_machine.system()
@@ -34,5 +34,5 @@ outlib = py.extension_module(
   install_dir : meson.global_source_root() / 'output_Python',
   include_directories : includes,
   cpp_args : db_compile_args,
-  dependencies : [eigen_dep, pybind_dep, py_dep],
+  dependencies : [eigen_dep, pybind_dep, py_dep, maya_dep],
 )
