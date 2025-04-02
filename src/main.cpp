@@ -3,135 +3,35 @@
 #include <DemBones/DemBonesExt.h>
 #include <DemBones/MatBlocks.h>
 #include <Python.h>
-#include <maya/MAnimControl.h>
-#include <maya/MColor.h>
-#include <maya/MColorArray.h>
-#include <maya/MDagPath.h>
-#include <maya/MDagPathArray.h>
-#include <maya/MEulerRotation.h>
-#include <maya/MFnDagNode.h>
-#include <maya/MFnDependencyNode.h>
-#include <maya/MFnMesh.h>
-#include <maya/MFnSkinCluster.h>
-#include <maya/MGlobal.h>
-#include <maya/MItDependencyGraph.h>
-#include <maya/MMatrix.h>
-#include <maya/MObject.h>
-#include <maya/MPlug.h>
-#include <maya/MPoint.h>
-#include <maya/MPointArray.h>
-#include <maya/MQuaternion.h>
-#include <maya/MSelectionList.h>
-#include <maya/MString.h>
-#include <maya/MTime.h>
-#include <maya/MTransformationMatrix.h>
-#include <maya/MTypes.h>
+#include <pybind11/eigen.h>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 #include <Eigen/Dense>
-#include <array>
 #include <iostream>
-#include <map>
-#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace py = pybind11;
 
-#define LOG(str)             \
-    {                        \
-        cout << str << endl; \
+#define LOG(str)                       \
+    {                                  \
+        std::cout << str << std::endl; \
     }
 
-#define CHECK_MSTATUS_AND_THROW(status)                                          \
-    {                                                                            \
-        if (status.error()) throw std::exception(status.errorString().asChar()); \
-    }
+typedef double Scalar;
+typedef float AniMeshScalar;
+typedef Dem::DemBonesExt<Scalar, AniMeshScalar> DBE;
+typedef Eigen::Matrix4<Scalar> Matrix4;
 
-MDagPath toMDagPath(std::string& name, bool shape) {
-    MStatus status;
-    MDagPath dag;
-    MSelectionList selection;
-
-    status = selection.add(MString(name.c_str()));
-    CHECK_MSTATUS_AND_THROW(status);
-    status = selection.getDagPath(0, dag, MObject::kNullObj);
-    CHECK_MSTATUS_AND_THROW(status);
-
-    if (shape) {
-        status = dag.extendToShape();
-        CHECK_MSTATUS_AND_THROW(status);
-    }
-
-    return dag;
-};
-
-Eigen::Matrix4d toMatrix4D(MMatrix& source) {
-    Eigen::Matrix4d target;
-
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            target(j, i) = source(i, j);
-        }
-    }
-
-    return target;
-};
-
-MMatrix toMMatrix(
-    MVector& translate, MVector& rotate, MTransformationMatrix::RotationOrder rotateOrder
-) {
-    MStatus status;
-    MTransformationMatrix matrix;
-
-    status = matrix.setTranslation(translate, MSpace::kObject);
-    CHECK_MSTATUS_AND_THROW(status);
-
-    const double rotation[3] = {rotate.x, rotate.y, rotate.z};
-    // status = matrix.setRotation(rotation, rotateOrder, MSpace::kObject);
-    status = matrix.setRotation(rotation, rotateOrder);
-    CHECK_MSTATUS_AND_THROW(status);
-    return matrix.asMatrix();
-};
-
-std::array<double, 16> toMatrixArray(MMatrix matrix) {
-    std::array<double, 16> matrixArray;
-
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            matrixArray[i * 4 + j] = matrix(i, j);
-        }
-    }
-
-    return matrixArray;
-};
-
-template <typename Scalar, typename AniMeshScalar>
-class DemBonesModel : public Dem::DemBonesExt<Scalar, AniMeshScalar> {
+class DemBonesModel : public DBE {
    public:
     double tolerance;
     int patience;
-    std::vector<AniMeshScalar> vertices;
-    std::vector<AniMeshScalar> animation;
-    std::vector<size_t> counts;
-    std::vector<size_t> connects;
-
-    std::vector < std::string >> bone_names;    // "The name of each bone influence."
-    std::vector < std::string >> bone_parents;  // "The name of each bone parent, or None if it has
-                                                // no parent"
-    std::vector<Scalar> bind;                   // "The bind pre-matrix per bone as a numpy array"
-    std::vector<Scalar> pre_mul_inv;  // "The inverse of any pre-local transformations per bone as a
-                                      // numpy array"
-    std::vector<char> rot_order;  // "The rotation order per bone as a numpy array. 0=X, 1=Y, 2=Z,
-                                  // so [0, 1, 2] is XYZ order"
-    std::vector<Scalar> orient;   // "The euler rotation per bone as a numpy array in degrees"
-
-    std::vector<Scalar> weight_vals;   // "The weight influence values"
-    std::vector<size_t> weight_verts;  // "The vertex index for each weight value"
-    std::vector<size_t> weight_bones;  // "The bone index for each weight value"
-    std::vector<Scalar> weight_locks;  // "The lock percent of each vertex, where 1.0 is fully
-                                       // locked"
+    bool lock_weights = false;
+    bool lock_bones = false;
+    DBE::MatrixX lr, lt, gb, lbr, lbt;
 
     DemBonesModel() : tolerance(1e-3), patience(3) {
         nIters = 30;
@@ -139,9 +39,7 @@ class DemBonesModel : public Dem::DemBonesExt<Scalar, AniMeshScalar> {
     }
 
     void clear() {
-        DemBonesExt<Scalar, AniMeshScalar>::clear();
-        points.clear();
-        boneIndex.clear();
+        Dem::DemBonesExt<Scalar, AniMeshScalar>::clear();
     }
 
     void cbIterBegin() { LOG("  iteration #" << iter); }
@@ -178,184 +76,237 @@ class DemBonesModel : public Dem::DemBonesExt<Scalar, AniMeshScalar> {
 
     bool cbWeightsIterEnd() { return false; }
 
-    void compute(bool row_major_mats, bool row_major_verts) { ; }
+    void validate() {
+        nS = 1;  // Only one subject at a time in this context
+        nV = u.cols();
+        nB = boneName.size();
+        nF = v.rows() / 3;
 
-    void set_weights(const py::list& weights, bool lock_weights) {
-        // TODO: Raise an exception
-        unsigned int vertIdx = 0;
-        weight_verts.clear();
-        weight_bones.clear();
-        weight_vals.clear();
-
-        for (const auto& vertItem : weights) {
-            if (!py::isinstance<py::dict>(vertItem)) {
-                continue;
+        if (lock_bones || lockM.size() == 0) {
+            lockM.resize(nB);
+            lockM *= 0;
+            if (lock_bones) {
+                lockM.array() += 1;
             }
-            py::dict vertDict = vertItem.cast(py::dict>();
-            for (const auto &weightItem: vertDict){
-                if (!py::isinstance<py::int_>(weightItem.first)) {
-                    continue;
-                }
-                if (!py::isinstance<py::float_>(weightItem.second)) {
-                    continue;
-                }
+        }
 
-                weight_verts.push_back(vertIdx);
-                weight_bones.push_back(weightItem.first.cast<int>());
-                weight_vals.push_back(weightItem.second.cast<Scalar>());
+        if (lock_weights || lockW.size() == 0) {
+            lockW.resize(nB);
+            lockW *= 0;
+            if (lock_weights) {
+                lockW.array() += 1;
+            }
+        }
+
+        // fill with identity if they're unset
+        if (bind.cols() == 0) {
+            bind.resize(4, 4 * nB);
+            for (size_t j = 0; j < nB; ++j) {
+                bind.blk4(0, j) = Matrix4::Identity();
+            }
+        }
+
+        if (preMulInv.cols() == 0) {
+            preMulInv.resize(4, 4 * nB);
+            for (size_t j = 0; j < nB; ++j) {
+                preMulInv.blk4(0, j) = Matrix4::Identity();
+            }
+        }
+        if (m.cols() == 0 || m.rows() == 0) {
+            m.resize(nF * 16, nB * 4);
+            for (size_t j = 0; j < nB; ++j) {
+                for (size_t k = 0; k < nF; ++k) {
+                    m.blk4(k, j) = Matrix4::Identity();
+                }
+            }
+        }
+
+        // clang-format off
+        // Double check that everything matches
+        if (v.cols() != nV){throw std::length_error("The animation doesn't match the number of verts in the rest pose");}
+        if (parent.size() != nB){throw std::length_error("The parent size doesn't match the boneName size");}
+        if (rotOrder.cols() != nB){throw std::length_error("The rotOrder size doesn't match the boneName size");}
+        if (orient.cols() != nB){throw std::length_error("the orient size doesn't match the boneName size");}
+        if (lockM.size() != nB){throw std::length_error("The bone tranform lock size doesn't match the boneName size");}
+        if (lockW.size() != nV){throw std::length_error("The weight lock size doesn't match the number of verts in the rest pose");}
+
+        if (bind.cols() != nB * 4){throw std::length_error("The bind size doesn't match the boneName size");}
+        if (preMulInv.cols() != nB * 4){throw std::length_error("The preMulInv size doesn't match the boneName size");}
+        if (m.cols() != nB * 4){throw std::length_error("The m size doesn't match the boneName size");}
+        if (m.rows() != nF * 16){throw std::length_error("The m size doesn't match the number of frames");}
+        // clang-format on
+
+        fStart.resize(nS + 1);
+        fStart(0) = 0;
+        fStart(1) = nF;
+        subjectID.resize(nF);
+        for (int s = 0; s < nS; s++) {
+            for (int k = fStart(s); k < fStart(s + 1); k++) {
+                subjectID(k) = s;
+            }
+        }
+    }
+
+    void compute() {
+        validate();
+        DBE::compute();
+        DBE::MatrixX lr, lt, gb, lbr, lbt;
+        bool degreeRot = false;
+        computeRTB(0, lr, lt, gb, lbr, lbt, degreeRot);
+    }
+
+    void set_weights(const py::list& weights) {
+        std::vector<Eigen::Triplet<Scalar>> trips;
+        unsigned int vertIdx = 0;
+        auto cweights = weights.cast<std::vector<std::unordered_map<int, Scalar>>>();
+        for (const auto& vertDict : cweights) {
+            for (const auto& weightItem : vertDict) {
+                trips.push_back(Eigen::Triplet<Scalar>(weightItem.first, vertIdx, weightItem.second)
+                );
             }
             vertIdx++;
         }
-
-        weight_locks.clear();
-        weight_locks.resize(vertIdx, lock_weights ? 1.0 : 0.0);
+        w.setFromTriplets(trips.begin(), trips.end());
     }
 
-    py::list get_weights() {
-        py::list ret;
-
+    std::vector<std::unordered_map<int, Scalar>> get_weights() {
+        std::vector<std::unordered_map<int, Scalar>> ret;
+        for (int boneIdx = 0; boneIdx < w.outerSize(); ++boneIdx) {
+            for (Eigen::SparseMatrix<double>::InnerIterator it(w, boneIdx); it; ++it) {
+                auto weight = it.value();
+                auto vertIdx = it.row();
+                if (vertIdx > ret.size() - 1) {
+                    ret.resize(vertIdx);
+                }
+                ret[vertIdx][boneIdx] = weight;
+            }
+        }
         return ret;
     }
 
-    py::array_t<Scalar> get_bone_transforms() {
-        py::array_t<Scalar> ret;
-
-        return ret;
+    void initialize_lock_weights(int numVerts) {
+        if (lockW.size() == 0) {
+            lockW = DBE::VectorX::Zero(numVerts);
+            if (lock_weights) {
+                lockW.array() += 1.0;
+            }
+        }
     }
+
+    // Weight definition
+    DBE::VectorX get_weight_locks() { return lockW; }
+    void set_weight_locks(Eigen::Ref<DBE::VectorX> newW) { lockW = newW; }
 
    private:
     double prevErr;
     int patience_count;
 };
 
-typedef DemBonesModel<double, float> DBM;
-
-
-// TODO: Switch to getter/setter
-
 PYBIND11_MODULE(_core, m) {
-    py::class_<DBM>(m, "DemBones")
+    py::class_<DemBonesModel>(m, "DemBones")
         .def(py::init<>())
 
         // Python behavior params
-
         .def_readwrite(
-            "tolerance", &DBM::tolerance,
+            "tolerance", &DemBonesModel::tolerance,
             "If the solver fails to converge faster than `tolerance` for `patience` iterations, "
             "bail out\n"
             "default = 1e-3"
         )
         .def_readwrite(
-            "patience", &DBM::patience,
+            "patience", &DemBonesModel::patience,
             "If the solver fails to converge faster than `tolerance` for `patience` iterations, "
             "bail out\n"
             "default = 3"
         )
 
         // Solver params
-        .def_readwrite("num_iterations", &DBM::nIters, "Number of global iterations, default = 30")
         .def_readwrite(
-            "num_transform_iterations", &DBM::nTransIters,
+            "num_iterations", &DemBonesModel::nIters, "Number of global iterations, default = 30"
+        )
+        .def_readwrite(
+            "num_transform_iterations", &DemBonesModel::nTransIters,
             "Number of bone transformations update iterations per global iteration, default = 5"
         )
         .def_readwrite(
-            "translation_affine", &DBM::transAffine,
+            "translation_affine", &DemBonesModel::transAffine,
             "Translations affinity soft constraint, default = 10.0"
         )
         .def_readwrite(
-            "translation_affine_norm", &DBM::transAffineNorm,
+            "translation_affine_norm", &DemBonesModel::transAffineNorm,
             "p-norm for bone translations affinity soft constraint, default = 4.0"
         )
         .def_readwrite(
-            "num_weight_iterations", &DBM::nWeightsIters,
+            "num_weight_iterations", &DemBonesModel::nWeightsIters,
             "Number of weights update iterations per global iteration, default = 3"
         )
         .def_readwrite(
-            "max_influences", &DBM::nnz, "Number of non-zero weights per vertex, default = 8"
+            "max_influences", &DemBonesModel::nnz,
+            "Number of non-zero weights per vertex, default = 8"
         )
         .def_readwrite(
-            "weights_smooth", &DBM::weightsSmooth,
+            "weights_smooth", &DemBonesModel::weightsSmooth,
             "Weights smoothness soft constraint, default = 1e-4"
         )
         .def_readwrite(
-            "weights_smooth_step", &DBM::weightsSmoothStep,
+            "weights_smooth_step", &DemBonesModel::weightsSmoothStep,
             "Step size for the weights smoothness soft constraint, default = 1.0"
         )
         .def_readwrite(
-            "weights_epsilon", &DBM::weightEps, "Epsilon for weights solver, default = 1e-15"
+            "weights_epsilon", &DemBonesModel::weightEps,
+            "Epsilon for weights solver, default = 1e-15"
         )
 
-        // Mesh definition
-        .def_readwrite("vertices", &DBM::vertices, "Numpy array of vertices")
-        .def_readwrite("animation", &DBM::animation, "Numpy array of vertex animation")
-        .def_readwrite("counts", &DBM::counts, "Numpy array of face counts")
-        .def_readwrite("connects", &DBM::connects, "Numpy array of face connects")
-
-        // Bone definition
-        .def_readwrite("bone_names", &DBM::bone_names, "The name of each bone influence.")
         .def_readwrite(
-            "bone_parents", &DBM::bone_parents,
-            "The name of each bone parent, or None if it has no parent"
-        )
-        .def_readwrite("bind", &DBM::bind, "The bind pre-matrix per bone as a numpy array")
-        .def_readwrite(
-            "pre_mul_inv", &DBM::pre_mul_inv,
-            "The inverse of any pre-local transformations per bone as a numpy array"
+            "lock_weights", &DemBonesModel::lock_weights,
+            "If weight locks are unset, then lock them all"
         )
         .def_readwrite(
-            "rot_order", &DBM::rot_order,
-            "The rotation order per bone as a numpy array. 0=X, 1=Y, 2=Z, so [0, 1, 2] is XYZ order"
-        )
-        .def_readwrite(
-            "orient", &DBM::orient, "The euler rotation per bone as a numpy array in degrees"
+            "lock_bones", &DemBonesModel::lock_bones, "If bone locks are unset, then lock them all"
         )
 
-        // Weight definition
-        .def_readwrite("weight_vals", &DBM::weight_vals, "The weight influence values")
-        .def_readwrite("weight_verts", &DBM::weight_verts, "The vertex index for each weight value")
-        .def_readwrite("weight_bones", &DBM::weight_bones, "The bone index for each weight value")
+        // Array and vector data
+        .def_readwrite("_u", &DemBonesModel::u, "Internal storage for rest verts")
+        .def_property(
+            "weights", &DemBonesModel::get_weights, &DemBonesModel::set_weights,
+            "Set the weight values in the form of a list like: list[dict[int, float]]\n"
+            "Where the list index is the vertex index, and each dictionary is the bone index\n"
+            "mapped to a weight\n"
+        )
+
+        .def_readwrite("lockW", &DemBonesModel::lockW, "The lock percent of each vertex")
+        .def_readwrite("_m", &DemBonesModel::m, "The bone transformations")
+        .def_readwrite("lockM", &DemBonesModel::lockM, "The bone transformations lock control")
+        .def_readwrite("fv", &DemBonesModel::fv, "The mesh topology")
+        .def_readwrite("fTime", &DemBonesModel::fTime, "The timestamps per-frame")
+        .def_readwrite("boneName", &DemBonesModel::boneName, "The name of the bones")
+        .def_readwrite("parent", &DemBonesModel::parent, "The indices of the parents of each bone")
+        .def_readwrite("_bind", &DemBonesModel::bind, "The original bind pre-matrix")
+        .def_readwrite("_preMulInv", &DemBonesModel::preMulInv, "Inverse Pre-mult matrices")
+        .def_readwrite("_rotOrder", &DemBonesModel::rotOrder, "The rotation order for each bone")
+        .def_readwrite("_orient", &DemBonesModel::orient, "The orientation of each bone")
+
+        .def_readonly("_lr", &DemBonesModel::lr, "Output local rotations")
+        .def_readonly("_lt", &DemBonesModel::lt, "Output local translations")
+        .def_readonly("_gb", &DemBonesModel::gb, "Output BindMatrices")
+        .def_readonly("_lbr", &DemBonesModel::lbr, "Output Local Bind rotations")
+        .def_readonly("_lbt", &DemBonesModel::lbt, "Output Local Bind translations")
+
         .def_readwrite(
-            "weight_locks", &DBM::weight_locks,
-            "The lock percent of each vertex, where 1.0 is fully locked"
+            "bindUpdate", &DemBonesModel::bindUpdate,
+            "Bind transformation update\n"
+            "    0=keep original\n"
+            "    1=set translations to p-norm centroids and rotations to identity\n"
+            "    2=do 1 and group joints"
+        )
+
+        .def_property_readonly(
+            "rmse", &DemBonesModel::rmse, "Root mean squared reconstruction error"
         )
 
         // Functions
-        .def("get_rmse", &DBM::rmse, "Root mean squared reconstruction error")
         .def(
-            "compute", &DBM::compute,
+            "compute", &DemBonesModel::compute,
             "Skinning decomposition of alternative updating weights and bone transformations\n"
-            "\n"
-            "Arguments:\n"
-            "    row-major-mats (bool):\n"
-            "        Whether the provided matrices will be expected as row-major (the default) or "
-            "column-major\n"
-            "        Row-major matrices have the translation values along the bottom row\n"
-            "    row-major-verts (bool):\n"
-            "        Whether the provided vertex arrays will be expected as row-major (the "
-            "default) or column-major\n"
-            "        Row-major arrays are indexed like array[vertIdx][xyz-component]\n",
-            py::arg("row_major_mats") = true, py::arg("row_major_verts" = true)
-        )
-        .def(
-            "set_weights", &DBM::set_weights,
-            "Conveinence function for setting the weight values. Takes a list[dict[int, float]] "
-            "where\n"
-            "the list index is the vertex index, and each dictionary is the bone index mapped to a "
-            "weight\n"
-            "By default, this locks all the weights unless you pass lock_weights=False",
-            py::arg("weights"), py::arg("lock_weights" = true)
-        )
-        .def(
-            "get_weights", &DBM::get_weights,
-            "Conveinence function for getting the weight values. Returns a list[dict[int, float]] "
-            "where\n"
-            "the list index is the vertex index, and each dictionary is the bone index mapped to a "
-            "weight"
-        )
-        .def(
-            "get_bone_transforms", &DBM::get_bone_transforms,
-            "Get the solved bone transforms as a numpy array. returnValue[boneIdx][frameIdx] = 4x4 "
-            "matrix\n"
-            "Returns identity matrices if the `compute` function has not been run"
-        )
+        );
 }

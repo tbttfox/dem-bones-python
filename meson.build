@@ -15,7 +15,6 @@ includes = include_directories([
 eigen_dep = dependency('eigen3')
 pybind_dep = dependency('pybind11')
 py_dep = dependency('python3')
-maya_dep = dependency('maya')
 
 
 os_name = build_machine.system()
@@ -34,5 +33,5 @@ outlib = py.extension_module(
   install_dir : meson.global_source_root() / 'output_Python',
   include_directories : includes,
   cpp_args : db_compile_args,
-  dependencies : [eigen_dep, pybind_dep, py_dep, maya_dep],
+  dependencies : [eigen_dep, pybind_dep, py_dep],
 )
