@@ -2,6 +2,7 @@ project('dem-bones-python', 'cpp', default_options: ['cpp_std=c++20'], meson_ver
 
 source_files = files([
   'src/main.cpp',
+  'src/dbmodel.cpp',
 ])
 
 # DemBones cmake is only for its command line tool
@@ -27,7 +28,7 @@ endif
 pymod = import('python')
 py = pymod.find_installation('python3')
 outlib = py.extension_module(
-  meson.project_name(),
+  '_dem_bones_core',
   sources : source_files,
   install: true,
   install_dir : meson.global_source_root() / 'output_Python',
