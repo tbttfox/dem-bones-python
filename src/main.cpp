@@ -34,6 +34,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace py = pybind11;
@@ -106,24 +107,41 @@ std::array<double, 16> toMatrixArray(MMatrix matrix) {
     return matrixArray;
 };
 
-double toGrayScale(const MColor& c) { return 0.2989 * c.r + 0.5870 * c.g + 0.1140 * c.b; }
-
-class DemBonesModel : public Dem::DemBonesExt<double, float> {
+template <typename Scalar, typename AniMeshScalar>
+class DemBonesModel : public Dem::DemBonesExt<Scalar, AniMeshScalar> {
    public:
-    int sF = 1001;
-    int eF = 1010;
-    std::vector<std::string> bonesMaya;
-    std::vector<double> weightsMaya;
-    std::map<std::string, MMatrix> bindMatricesMaya;
-    std::map<std::string, std::map<int, MMatrix>> animMatricesMaya;
-    std::map<std::string, MTransformationMatrix::RotationOrder> rotOrderMaya;
-
     double tolerance;
     int patience;
+    std::vector<AniMeshScalar> vertices;
+    std::vector<AniMeshScalar> animation;
+    std::vector<size_t> counts;
+    std::vector<size_t> connects;
+
+    std::vector < std::string >> bone_names;    // "The name of each bone influence."
+    std::vector < std::string >> bone_parents;  // "The name of each bone parent, or None if it has
+                                                // no parent"
+    std::vector<Scalar> bind;                   // "The bind pre-matrix per bone as a numpy array"
+    std::vector<Scalar> pre_mul_inv;  // "The inverse of any pre-local transformations per bone as a
+                                      // numpy array"
+    std::vector<char> rot_order;  // "The rotation order per bone as a numpy array. 0=X, 1=Y, 2=Z,
+                                  // so [0, 1, 2] is XYZ order"
+    std::vector<Scalar> orient;   // "The euler rotation per bone as a numpy array in degrees"
+
+    std::vector<Scalar> weight_vals;   // "The weight influence values"
+    std::vector<size_t> weight_verts;  // "The vertex index for each weight value"
+    std::vector<size_t> weight_bones;  // "The bone index for each weight value"
+    std::vector<Scalar> weight_locks;  // "The lock percent of each vertex, where 1.0 is fully
+                                       // locked"
 
     DemBonesModel() : tolerance(1e-3), patience(3) {
         nIters = 30;
         clear();
+    }
+
+    void clear() {
+        DemBonesExt<Scalar, AniMeshScalar>::clear();
+        points.clear();
+        boneIndex.clear();
     }
 
     void cbIterBegin() { LOG("  iteration #" << iter); }
@@ -132,13 +150,13 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
         double err = rmse();
         LOG("    rmse = " << err);
         if ((err < prevErr * (1 + weightEps)) && ((prevErr - err) < tolerance * prevErr)) {
-            np--;
-            if (np == 0) {
+            patience_count--;
+            if (patience_count == 0) {
                 LOG("  convergence is reached");
                 return true;
             }
         } else {
-            np = patience;
+            patience_count = patience;
         }
         prevErr = err;
         return false;
@@ -160,500 +178,184 @@ class DemBonesModel : public Dem::DemBonesExt<double, float> {
 
     bool cbWeightsIterEnd() { return false; }
 
-    void extractSource(MDagPath& dag, MFnMesh& mesh) {
-        Eigen::MatrixXd wd(0, 0);
-        std::map<
-            std::string, Eigen::MatrixXd, std::less<std::string>,
-            Eigen::aligned_allocator<std::pair<const std::string, Eigen::MatrixXd>>>
-            mT;
-        std::map<
-            std::string, Eigen::VectorXd, std::less<std::string>,
-            Eigen::aligned_allocator<std::pair<const std::string, Eigen::VectorXd>>>
-            wT;
-        std::map<
-            std::string, Eigen::Matrix4d, std::less<std::string>,
-            Eigen::aligned_allocator<std::pair<const std::string, Eigen::Matrix4d>>>
-            bindMatrices;
+    void compute(bool row_major_mats, bool row_major_verts) { ; }
 
-        MIntArray indices;
-        MDoubleArray weights;
-        MDagPath boneParentMaya;
-        MDagPathArray bonesMaya;
-        bool hasKeyFrame = false;
+    void set_weights(const py::list& weights, bool lock_weights) {
+        // TODO: Raise an exception
+        unsigned int vertIdx = 0;
+        weight_verts.clear();
+        weight_bones.clear();
+        weight_vals.clear();
 
-        time.setValue(sF);
-        anim.setCurrentTime(time);
-
-        // update model: bind vertex positions
-        status = mesh.getPoints(points, MSpace::kWorld);
-        CHECK_MSTATUS_AND_THROW(status);
-
-        u.resize(3, nV);
-
-        #pragma omp parallel for
-        for (int i = 0; i < nV; i++) {
-            MPoint point = points[i];
-            u.col(i) << point.x, point.y, point.z;
-        }
-
-        // update model: face connections
-        int nFV = mesh.numPolygons();
-        fv.resize(nFV);
-
-        for (int i = 0; i < nFV; i++) {
-            mesh.getPolygonVertices(i, indices);
-            int length = indices.length();
-            for (int j = 0; j < length; j++) {
-                fv[i].push_back((int)indices[j]);
+        for (const auto& vertItem : weights) {
+            if (!py::isinstance<py::dict>(vertItem)) {
+                continue;
             }
-        }
-
-        // update model: weights and skeleton
-        MObject dobj = dag.node();
-        MItDependencyGraph graphIter(dobj, MFn::kSkinClusterFilter, MItDependencyGraph::kUpstream);
-        MObject rootNode = graphIter.currentItem(&status);
-
-        if (MS::kSuccess == status) {
-            // query bones
-            MFnSkinCluster skinCluster(rootNode);
-            nB = skinCluster.influenceObjects(bonesMaya, &status);
-            CHECK_MSTATUS_AND_THROW(status);
-
-            // get bones names
-            boneName.resize(nB);
-            for (int j = 0; j < nB; j++) {
-                std::string name = bonesMaya[j].partialPathName().asUTF8();
-                boneName[j] = name;
-                boneIndex[name] = j;
-            }
-
-            // get bone weights
-            for (int j = 0; j < nB; j++) {
-                status = skinCluster.getWeights(dag, MObject::kNullObj, j, weights);
-                CHECK_MSTATUS_AND_THROW(status);
-
-                wT[boneName[j]] = Eigen::VectorXd::Zero(nV);
-                for (int k = 0; k < nV; k++) {
-                    wT[boneName[j]](k) = weights[k];
+            py::dict vertDict = vertItem.cast(py::dict>();
+            for (const auto &weightItem: vertDict){
+                if (!py::isinstance<py::int_>(weightItem.first)) {
+                    continue;
                 }
-            }
-        }
-
-        parent.resize(nB);
-        bind.resize(nS * 4, nB * 4);
-        preMulInv.resize(nS * 4, nB * 4);
-        rotOrder.resize(nS * 3, nB);
-        orient.resize(nS * 3, nB);
-        lockM.resize(nB);
-        lockW = Eigen::VectorXd::Zero(nV);
-
-        // update model: weights
-        if (wT.size() != 0) {
-            wd = Eigen::MatrixXd::Zero(nB, nV);
-            for (int j = 0; j < nB; j++) {
-                wd.row(j) = wT[boneName[j]].transpose();
-            }
-        }
-
-        // update model: weights locked
-        MString colourSet = "demLock";
-        if (mesh.hasColorChannels(colourSet)) {
-            MColorArray colours;
-            status = mesh.getVertexColors(colours, &colourSet);
-            CHECK_MSTATUS_AND_THROW(status);
-
-            for (int c = 0; c < (int)colours.length(); c++) {
-                lockW(c) = toGrayScale(colours[c]);
-            }
-        }
-
-        // update model: skeleton
-        for (int j = 0; j < nB; j++) {
-            // get name
-            std::string name = boneName[j];
-
-            // get parent
-            MObject boneObj = bonesMaya[j].node();
-            MFnDagNode boneDagFn(boneObj, &status);
-            CHECK_MSTATUS_AND_THROW(status);
-            MObject boneParentObj = boneDagFn.parent(0);
-
-            if (!boneParentObj.isNull() && boneParentObj.hasFn(MFn::kJoint)) {
-                status = MDagPath::getAPathTo(boneParentObj, boneParentMaya);
-                CHECK_MSTATUS_AND_THROW(status);
-
-                std::string parentName = boneParentMaya.partialPathName().asUTF8();
-                if (boneIndex.find(parentName) == boneIndex.end()) {
-                    parent(j) = -1;
-                } else {
-                    parent(j) = boneIndex[parentName];
+                if (!py::isinstance<py::float_>(weightItem.second)) {
+                    continue;
                 }
-            } else {
-                parent(j) = -1;
+
+                weight_verts.push_back(vertIdx);
+                weight_bones.push_back(weightItem.first.cast<int>());
+                weight_vals.push_back(weightItem.second.cast<Scalar>());
             }
-
-            // get bind matrix
-            mT[name].resize(nF * 4, 4);
-            MMatrix tmpIM = bonesMaya[j].inclusiveMatrix();
-            Eigen::Matrix4d bindMatrix = toMatrix4D(tmpIM);
-            bind.blk4(0, j) = bindMatrix;
-            bindMatrices[name] = bindMatrix;
-
-            // get rotation order
-            MPlug rotateOrderPlug = boneDagFn.findPlug("rotateOrder", true, &status);
-            CHECK_MSTATUS_AND_THROW(status);
-
-            int rotateOrder = rotateOrderPlug.asInt();
-            switch (rotateOrder) {
-                case 0: {
-                    rotOrder.vec3(0, j) = Eigen::Vector3i(0, 1, 2);
-                    rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kXYZ;
-                    break;
-                }
-                case 1: {
-                    rotOrder.vec3(0, j) = Eigen::Vector3i(1, 2, 0);
-                    rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kYZX;
-                    break;
-                }
-                case 2: {
-                    rotOrder.vec3(0, j) = Eigen::Vector3i(2, 0, 1);
-                    rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kZXY;
-                    break;
-                }
-                case 3: {
-                    rotOrder.vec3(0, j) = Eigen::Vector3i(0, 2, 1);
-                    rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kXZY;
-                    break;
-                }
-                case 4: {
-                    rotOrder.vec3(0, j) = Eigen::Vector3i(1, 0, 2);
-                    rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kYXZ;
-                    break;
-                }
-                case 5: {
-                    rotOrder.vec3(0, j) = Eigen::Vector3i(2, 1, 0);
-                    rotOrderMaya[name] = MTransformationMatrix::RotationOrder::kZYX;
-                    break;
-                }
-            }
-
-            // get joint orient
-            MPlug jointOrientPlug = boneDagFn.findPlug("jointOrient", true, &status);
-            CHECK_MSTATUS_AND_THROW(status);
-
-            double jointOrientX = jointOrientPlug.child(0).asMAngle().asDegrees();
-            double jointOrientY = jointOrientPlug.child(1).asMAngle().asDegrees();
-            double jointOrientZ = jointOrientPlug.child(2).asMAngle().asDegrees();
-            orient.vec3(0, j) = Eigen::Vector3d(jointOrientX, jointOrientY, jointOrientZ);
-
-            // get pre multiply inverse
-            if (!boneParentObj.isNull() && parent(j) == -1) {
-                status = MDagPath::getAPathTo(boneParentObj, boneParentMaya);
-                CHECK_MSTATUS_AND_THROW(status);
-
-                MMatrix tmpIM = boneParentMaya.inclusiveMatrix();
-                Eigen::Matrix4d gp = toMatrix4D(tmpIM);
-                preMulInv.blk4(0, j) = gp.inverse();
-            } else {
-                preMulInv.blk4(0, j) = Eigen::Matrix4d::Identity();
-            }
-
-            // get dem lock
-            MPlug demLockPlug = boneDagFn.findPlug("demLock", true, &status);
-            if (MS::kSuccess == status) {
-                lockM(j) = demLockPlug.asInt();
-            } else {
-                lockM(j) = 0;
-            }
+            vertIdx++;
         }
 
-        // update model: skeleton animation
-        m.resize(nF * 4, nB * 4);
-        for (int k = sF; k < eF + 1; k++) {
-            time.setValue(k);
-            anim.setCurrentTime(time);
-            int num = k - sF;
-
-            for (int j = 0; j < nB; j++) {
-                // get name
-                std::string name = boneName[j];
-
-                // set matrix
-                MMatrix tmpIM = bonesMaya[j].inclusiveMatrix();
-                Eigen::Matrix4d matrix = toMatrix4D(tmpIM);
-                mT[name].blk4(num, 0) = matrix * bindMatrices[name].inverse();
-            }
-        }
-        for (int j = 0; j < nB; j++) {
-            m.block(0, j * 4, nF * 4, 4) = mT[boneName[j]];
-        }
-
-        // update model: animation state
-        MString transformAttributes[9] = {"tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz"};
-        for (int j = 0; j < nB; j++) {
-            std::string nj = boneName[j];
-
-            for (int k = 0; k < 9; k++) {
-                MFnDependencyNode node(bonesMaya[j].node(), &status);
-                CHECK_MSTATUS_AND_THROW(status);
-
-                MPlug plug = node.findPlug(transformAttributes[k], true, &status);
-                CHECK_MSTATUS_AND_THROW(status);
-
-                if (plug.isDestination()) {
-                    hasKeyFrame = true;
-                    break;
-                }
-            }
-        }
-
-        w = (wd / nS).sparseView(1, 1e-20);
-        lockW = lockW /= (double)nS;
-        if (!hasKeyFrame) {
-            m.resize(0, 0);
-        }
-
-        // report
-        LOG("extracted source");
-        LOG("  " << nV << " vertices");
-        if (nB != 0) {
-            LOG("  " << nB << " joints");
-        }
-        if (hasKeyFrame) {
-            LOG("  keyframes found");
-        }
-        if (w.size() != 0) {
-            LOG("  skinning found");
-        }
+        weight_locks.clear();
+        weight_locks.resize(vertIdx, lock_weights ? 1.0 : 0.0);
     }
 
-    void extractTarget(MFnMesh& mesh) {
-        // update model: animated vertex positions
-        for (int k = sF; k < eF + 1; k++) {
-            time.setValue(k);
-            anim.setCurrentTime(time);
+    py::list get_weights() {
+        py::list ret;
 
-            int num = k - sF;
-            fTime(num) = time.asUnits(MTime::kSeconds);
-            status = mesh.getPoints(points, MSpace::kWorld);
-            CHECK_MSTATUS_AND_THROW(status);
-
-            #pragma omp parallel for
-            for (int i = 0; i < nV; i++) {
-                MPoint point = points[i];
-                v.col(i).segment<3>(num * 3) << (float)point.x, (float)point.y, (float)point.z;
-            }
-        }
-
-        // update model: subject ids
-        subjectID.resize(nF);
-        for (int s = 0; s < nS; s++) {
-            for (int k = fStart(s); k < fStart(s + 1); k++) {
-                subjectID(k) = s;
-            }
-        }
-
-        LOG("extracted target");
+        return ret;
     }
 
-    void compute(std::string& source, std::string& target, int& startFrame, int& endFrame) {
-        // log parameters
-        LOG("parameters");
-        LOG("  source                   = " << source);
-        LOG("  target                   = " << target);
-        LOG("  start_frame              = " << startFrame);
-        LOG("  end_frame                = " << endFrame);
-        LOG("  num_iterations           = " << nIters);
-        LOG("  patience                 = " << patience);
-        LOG("  tolerance                = " << tolerance);
-        LOG("  num_transform_iterations = " << nTransIters);
-        LOG("  num_weight_iterations    = " << nWeightsIters);
-        LOG("  translation_affine       = " << transAffine);
-        LOG("  translation_affine_norm  = " << transAffineNorm);
-        LOG("  max_influences           = " << nnz);
-        LOG("  weights_smooth           = " << weightsSmooth);
-        LOG("  weights_smooth_step      = " << weightsSmoothStep);
-        LOG("  weights_epsilon          = " << weightEps);
+    py::array_t<Scalar> get_bone_transforms() {
+        py::array_t<Scalar> ret;
 
-        // variables
-        prevErr = -1;
-        np = patience;
-
-        // get geometry
-        MDagPath sourcePath = toMDagPath(source, true);
-        MDagPath targetPath = toMDagPath(target, true);
-
-        MFnMesh sourceMeshFn(sourcePath, &status);
-        CHECK_MSTATUS_AND_THROW(status);
-        MFnMesh targetMeshFn(targetPath, &status);
-        CHECK_MSTATUS_AND_THROW(status);
-
-        // update model
-        nS = 1;
-        sF = startFrame;
-        eF = endFrame;
-        nF = endFrame - startFrame + 1;
-        nV = sourceMeshFn.numVertices();
-        int cF = (int)anim.currentTime().value();
-
-        if (sF >= eF) {
-            throw std::exception(
-                "Start frame is not allowed to be equal or larger than the end frame."
-            );
-        }
-        if (nV != sourceMeshFn.numVertices()) {
-            throw std::exception("Vertex count between source and target do not match.");
-        }
-
-        v.resize(3 * nF, nV);
-        fTime.resize(nF);
-        fStart.resize(nS + 1);
-        fStart(0) = 0;
-        fStart(1) = nF;
-
-        // update model: source + target
-        extractTarget(targetMeshFn);
-        extractSource(sourcePath, sourceMeshFn);
-
-        // initialize model
-        if (nB == 0) {
-            throw std::exception("No influences found.");
-        }
-
-        // compute model
-        LOG("computing");
-        DemBonesExt<double, float>::compute();
-
-        // compute transformations + weights
-        Eigen::VectorXd tVal, rVal;
-        Eigen::MatrixXd lr, lt, gb, lbr, lbt;
-        computeRTB(0, lr, lt, gb, lbr, lbt, false);
-
-        for (int j = 0; j < nB; j++) {
-            std::string name = boneName[j];
-            bonesMaya.push_back(name);
-            MVector translate = MVector(lbt(0, j), lbt(1, j), lbt(2, j));
-            MVector rotate = MVector(lbr(0, j), lbr(1, j), lbr(2, j));
-            bindMatricesMaya[name] = toMMatrix(translate, rotate, rotOrderMaya[name]);
-
-            tVal = lt.col(j);
-            rVal = lr.col(j);
-
-            for (int k = sF; k < eF + 1; k++) {
-                int num = k - sF;
-                MVector translate =
-                    MVector(tVal(num * 3), tVal((num * 3) + 1), tVal((num * 3) + 2));
-                MVector rotate = MVector(rVal(num * 3), rVal((num * 3) + 1), rVal((num * 3) + 2));
-                animMatricesMaya[name][k] = toMMatrix(translate, rotate, rotOrderMaya[name]);
-            }
-        }
-
-        weightsMaya.resize(nB * nV);
-        Eigen::SparseMatrix<double> wT = w.transpose();
-        for (int j = 0; j < nB; j++) {
-            for (Eigen::SparseMatrix<double>::InnerIterator it(wT, j); it; ++it) {
-                weightsMaya[((int)it.row() * nB) + j] = it.value();
-            }
-        }
-
-        time.setValue(cF);
-        anim.setCurrentTime(time);
-    }
-
-    std::array<double, 16> bindMatrix(std::string& bone) {
-        if (bindMatricesMaya.find(bone) == bindMatricesMaya.end()) {
-            throw std::exception("Provided influence is not valid.");
-        }
-
-        return toMatrixArray(bindMatricesMaya[bone]);
-    }
-
-    std::array<double, 16> animMatrix(std::string& bone, int& frame) {
-        if (animMatricesMaya.find(bone) == animMatricesMaya.end()) {
-            throw std::exception("Provided bone is not valid.");
-        }
-        if (animMatricesMaya[bone].find(frame) == animMatricesMaya[bone].end()) {
-            throw std::exception("Provided frame is not valid.");
-        }
-
-        return toMatrixArray(animMatricesMaya[bone][frame]);
-    }
-
-    void clear() {
-        DemBonesExt<double, float>::clear();
-        points.clear();
-        boneIndex.clear();
+        return ret;
     }
 
    private:
     double prevErr;
-    int np;
+    int patience_count;
+};
 
-    MStatus status;
-    MTime time;
-    MAnimControl anim;
-    MPointArray points;
-    std::map<std::string, int> boneIndex;
-} model;
+typedef DemBonesModel<double, float> DBM;
+
+
+// TODO: Switch to getter/setter
 
 PYBIND11_MODULE(_core, m) {
-    py::class_<DemBonesModel>(m, "DemBones")
+    py::class_<DBM>(m, "DemBones")
         .def(py::init<>())
+
+        // Python behavior params
+
         .def_readwrite(
-            "num_iterations", &DemBonesModel::nIters, "Number of global iterations, default = 30"
+            "tolerance", &DBM::tolerance,
+            "If the solver fails to converge faster than `tolerance` for `patience` iterations, "
+            "bail out\n"
+            "default = 1e-3"
         )
         .def_readwrite(
-            "num_transform_iterations", &DemBonesModel::nTransIters,
+            "patience", &DBM::patience,
+            "If the solver fails to converge faster than `tolerance` for `patience` iterations, "
+            "bail out\n"
+            "default = 3"
+        )
+
+        // Solver params
+        .def_readwrite("num_iterations", &DBM::nIters, "Number of global iterations, default = 30")
+        .def_readwrite(
+            "num_transform_iterations", &DBM::nTransIters,
             "Number of bone transformations update iterations per global iteration, default = 5"
         )
         .def_readwrite(
-            "translation_affine", &DemBonesModel::transAffine,
+            "translation_affine", &DBM::transAffine,
             "Translations affinity soft constraint, default = 10.0"
         )
         .def_readwrite(
-            "translation_affine_norm", &DemBonesModel::transAffineNorm,
+            "translation_affine_norm", &DBM::transAffineNorm,
             "p-norm for bone translations affinity soft constraint, default = 4.0"
         )
         .def_readwrite(
-            "num_weight_iterations", &DemBonesModel::nWeightsIters,
+            "num_weight_iterations", &DBM::nWeightsIters,
             "Number of weights update iterations per global iteration, default = 3"
         )
         .def_readwrite(
-            "max_influences", &DemBonesModel::nnz,
-            "Number of non-zero weights per vertex, default = 8"
+            "max_influences", &DBM::nnz, "Number of non-zero weights per vertex, default = 8"
         )
         .def_readwrite(
-            "weights_smooth", &DemBonesModel::weightsSmooth,
+            "weights_smooth", &DBM::weightsSmooth,
             "Weights smoothness soft constraint, default = 1e-4"
         )
         .def_readwrite(
-            "weights_smooth_step", &DemBonesModel::weightsSmoothStep,
+            "weights_smooth_step", &DBM::weightsSmoothStep,
             "Step size for the weights smoothness soft constraint, default = 1.0"
         )
         .def_readwrite(
-            "weights_epsilon", &DemBonesModel::weightEps,
-            "Epsilon for weights solver, default = 1e-15"
+            "weights_epsilon", &DBM::weightEps, "Epsilon for weights solver, default = 1e-15"
         )
-        .def_readonly("start_frame", &DemBonesModel::sF, "Start frame of solver")
-        .def_readonly("end_frame", &DemBonesModel::eF, "End frame of solver")
-        .def_readonly("influences", &DemBonesModel::bonesMaya, "List of all influences")
-        .def_readonly(
-            "weights", &DemBonesModel::weightsMaya,
-            "List of weights for all influences and vertices"
+
+        // Mesh definition
+        .def_readwrite("vertices", &DBM::vertices, "Numpy array of vertices")
+        .def_readwrite("animation", &DBM::animation, "Numpy array of vertex animation")
+        .def_readwrite("counts", &DBM::counts, "Numpy array of face counts")
+        .def_readwrite("connects", &DBM::connects, "Numpy array of face connects")
+
+        // Bone definition
+        .def_readwrite("bone_names", &DBM::bone_names, "The name of each bone influence.")
+        .def_readwrite(
+            "bone_parents", &DBM::bone_parents,
+            "The name of each bone parent, or None if it has no parent"
         )
-        .def("rmse", &DemBonesModel::rmse, "Root mean squared reconstruction error")
+        .def_readwrite("bind", &DBM::bind, "The bind pre-matrix per bone as a numpy array")
+        .def_readwrite(
+            "pre_mul_inv", &DBM::pre_mul_inv,
+            "The inverse of any pre-local transformations per bone as a numpy array"
+        )
+        .def_readwrite(
+            "rot_order", &DBM::rot_order,
+            "The rotation order per bone as a numpy array. 0=X, 1=Y, 2=Z, so [0, 1, 2] is XYZ order"
+        )
+        .def_readwrite(
+            "orient", &DBM::orient, "The euler rotation per bone as a numpy array in degrees"
+        )
+
+        // Weight definition
+        .def_readwrite("weight_vals", &DBM::weight_vals, "The weight influence values")
+        .def_readwrite("weight_verts", &DBM::weight_verts, "The vertex index for each weight value")
+        .def_readwrite("weight_bones", &DBM::weight_bones, "The bone index for each weight value")
+        .def_readwrite(
+            "weight_locks", &DBM::weight_locks,
+            "The lock percent of each vertex, where 1.0 is fully locked"
+        )
+
+        // Functions
+        .def("get_rmse", &DBM::rmse, "Root mean squared reconstruction error")
         .def(
-            "compute", &DemBonesModel::compute,
-            "Skinning decomposition of alternative updating weights and bone transformations",
-            py::arg("source"), py::arg("target"), py::arg("start_frame"), py::arg("end_frame")
+            "compute", &DBM::compute,
+            "Skinning decomposition of alternative updating weights and bone transformations\n"
+            "\n"
+            "Arguments:\n"
+            "    row-major-mats (bool):\n"
+            "        Whether the provided matrices will be expected as row-major (the default) or "
+            "column-major\n"
+            "        Row-major matrices have the translation values along the bottom row\n"
+            "    row-major-verts (bool):\n"
+            "        Whether the provided vertex arrays will be expected as row-major (the "
+            "default) or column-major\n"
+            "        Row-major arrays are indexed like array[vertIdx][xyz-component]\n",
+            py::arg("row_major_mats") = true, py::arg("row_major_verts" = true)
         )
         .def(
-            "bind_matrix", &DemBonesModel::bindMatrix,
-            "Get the bind matrix for the provided influence", py::arg("influence")
+            "set_weights", &DBM::set_weights,
+            "Conveinence function for setting the weight values. Takes a list[dict[int, float]] "
+            "where\n"
+            "the list index is the vertex index, and each dictionary is the bone index mapped to a "
+            "weight\n"
+            "By default, this locks all the weights unless you pass lock_weights=False",
+            py::arg("weights"), py::arg("lock_weights" = true)
         )
         .def(
-            "anim_matrix", &DemBonesModel::animMatrix,
-            "Get the animation matrix for the provided influence at the provided frame",
-            py::arg("influence"), py::arg("frame")
-        );
+            "get_weights", &DBM::get_weights,
+            "Conveinence function for getting the weight values. Returns a list[dict[int, float]] "
+            "where\n"
+            "the list index is the vertex index, and each dictionary is the bone index mapped to a "
+            "weight"
+        )
+        .def(
+            "get_bone_transforms", &DBM::get_bone_transforms,
+            "Get the solved bone transforms as a numpy array. returnValue[boneIdx][frameIdx] = 4x4 "
+            "matrix\n"
+            "Returns identity matrices if the `compute` function has not been run"
+        )
 }
