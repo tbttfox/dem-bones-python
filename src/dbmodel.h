@@ -23,6 +23,8 @@ class DemBonesModel : public DBE {
     bool lock_weights = false;
     bool lock_bones = false;
     DBE::MatrixX lr, lt, gb, lbr, lbt;
+    std::vector<int> wvi, wbi;
+    std::vector<Scalar> wfv;
 
     DemBonesModel() : tolerance(1e-3), patience(3) {
         nIters = 30;
@@ -55,9 +57,9 @@ class DemBonesModel : public DBE {
 
     void compute();
 
-    void set_weights(std::vector<std::unordered_map<int, Scalar>>& cweights);
+    void exposeWeights();
 
-    std::vector<std::unordered_map<int, Scalar>> get_weights();
+    void ingestWeights();
 
    private:
     double prevErr;

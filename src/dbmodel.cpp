@@ -1,5 +1,17 @@
 #include "dbmodel.h"
 
+#include <algorithm>  // std::sort std::stable_sort
+#include <format>
+#include <numeric>  // std::iota
+
+template <typename T>
+std::vector<size_t> sort_indexes(const std::vector<T>& v) {
+    std::vector<size_t> idx(v.size());
+    std::iota(idx.begin(), idx.end(), 0);
+    std::stable_sort(idx.begin(), idx.end(), [&v](size_t i1, size_t i2) { return v[i1] < v[i2]; });
+    return idx;
+}
+
 bool DemBonesModel::cbIterEnd() {
     double err = rmse();
     LOG("    rmse = " << err);
@@ -28,7 +40,7 @@ void DemBonesModel::validate() {
         if (nF == 0){throw std::length_error("No target animation given");}
     // clang-format on
 
-    if (lock_bones || lockM.size() == 0) {
+    if (lock_bones || (lockM.size() == 0)) {
         lockM.resize(nB);
         lockM *= 0;
         if (lock_bones) {
@@ -36,12 +48,30 @@ void DemBonesModel::validate() {
         }
     }
 
-    if (lock_weights || lockW.size() == 0) {
-        lockW.resize(nB);
+    if (lock_weights || (lockW.size() == 0)) {
+        lockW.resize(nV);
         lockW *= 0;
         if (lock_weights) {
             lockW.array() += 1;
         }
+    }
+
+    if (parent.size() == 0) {
+        parent.resize(nB);
+        parent *= 0;
+        parent.array() -= 1;
+    }
+
+    if (rotOrder.cols() == 0) {
+        rotOrder.resize(3, nB);
+        rotOrder.row(0).setConstant(0);
+        rotOrder.row(1).setConstant(1);
+        rotOrder.row(2).setConstant(2);
+    }
+
+    if (orient.cols() == 0) {
+        orient.resize(3, nB);
+        orient *= 0;
     }
 
     // fill with identity if they're unset
@@ -58,8 +88,8 @@ void DemBonesModel::validate() {
             preMulInv.blk4(0, j) = Matrix4::Identity();
         }
     }
-    if (m.cols() == 0 || m.rows() == 0) {
-        m.resize(nF * 16, nB * 4);
+    if ((m.cols() == 0) || (m.rows() == 0)) {
+        m.resize(nF * 4, nB * 4);
         for (size_t j = 0; j < nB; ++j) {
             for (size_t k = 0; k < nF; ++k) {
                 m.blk4(k, j) = Matrix4::Identity();
@@ -69,17 +99,17 @@ void DemBonesModel::validate() {
 
     // clang-format off
         // Double check that everything matches
-        if (v.cols() != nV){throw std::length_error("The animation doesn't match the number of verts in the rest pose");}
-        if (parent.size() != nB){throw std::length_error("The parent size doesn't match the boneName size");}
-        if (rotOrder.cols() != nB){throw std::length_error("The rotOrder size doesn't match the boneName size");}
-        if (orient.cols() != nB){throw std::length_error("the orient size doesn't match the boneName size");}
-        if (lockM.size() != nB){throw std::length_error("The bone tranform lock size doesn't match the boneName size");}
-        if (lockW.size() != nV){throw std::length_error("The weight lock size doesn't match the number of verts in the rest pose");}
+        if (v.cols() != nV){throw std::length_error(std::format("The animation vert count ({}) doesn't match the number of verts in the rest pose ({})", v.cols(), nV));}
+        if (parent.size() != nB){throw std::length_error(std::format("The parent size ({}) doesn't match the boneName size ({})", parent.size(), nB));}
+        if (rotOrder.cols() != nB){throw std::length_error(std::format("The rotOrder size ({}) doesn't match the boneName size ({})", rotOrder.cols(), nB));}
+        if (orient.cols() != nB){throw std::length_error(std::format("the orient size ({}) doesn't match the boneName size ({})", orient.cols(), nB));}
+        if (lockM.size() != nB){throw std::length_error(std::format("The bone tranform lock size ({}) doesn't match the boneName size ({})", lockM.size(), nB));}
+        if (lockW.size() != nV){throw std::length_error(std::format("The weight lock size ({}) doesn't match the number of verts in the rest pose ({})", lockW.size(), nV));}
 
-        if (bind.cols() != nB * 4){throw std::length_error("The bind size doesn't match the boneName size");}
-        if (preMulInv.cols() != nB * 4){throw std::length_error("The preMulInv size doesn't match the boneName size");}
-        if (m.cols() != nB * 4){throw std::length_error("The m size doesn't match the boneName size");}
-        if (m.rows() != nF * 16){throw std::length_error("The m size doesn't match the number of frames");}
+        if (bind.cols() != nB * 4){throw std::length_error(std::format("The bind size ({}) doesn't match the boneName size (4 * {})", bind.cols(), nB));}
+        if (preMulInv.cols() != nB * 4){throw std::length_error(std::format("The preMulInv size ({}) doesn't match the boneName size (4 * {})", preMulInv.cols(), nB));}
+        if (m.cols() != nB * 4){throw std::length_error(std::format("The m col size ({}) doesn't match the boneName size (4 * {})", m.cols(), nB));}
+        if (m.rows() != nF * 4){throw std::length_error(std::format("The m row size ({}) doesn't match the number of frames (4 * {})", m.rows(), nF));}
     // clang-format on
 
     fStart.resize(nS + 1);
@@ -93,37 +123,34 @@ void DemBonesModel::validate() {
     }
 }
 
-void DemBonesModel::compute() {
-    validate();
-    DBE::compute();
-    DBE::MatrixX lr, lt, gb, lbr, lbt;
-    bool degreeRot = false;
-    computeRTB(0, lr, lt, gb, lbr, lbt, degreeRot);
+void DemBonesModel::exposeWeights() {
+    wvi.clear();
+    wbi.clear();
+    wfv.clear();
+
+    for (int boneIdx = 0; boneIdx < w.outerSize(); ++boneIdx) {
+        for (Eigen::SparseMatrix<double>::InnerIterator it(w, boneIdx); it; ++it) {
+            wbi.push_back(boneIdx);
+            wvi.push_back(it.row());
+            wfv.push_back(it.value());
+        }
+    }
 }
 
-void DemBonesModel::set_weights(std::vector<std::unordered_map<int, Scalar>>& cweights) {
+void DemBonesModel::ingestWeights() {
     std::vector<Eigen::Triplet<Scalar>> trips;
-    unsigned int vertIdx = 0;
-    for (const auto& vertDict : cweights) {
-        for (const auto& weightItem : vertDict) {
-            trips.push_back(Eigen::Triplet<Scalar>(weightItem.first, vertIdx, weightItem.second));
-        }
-        vertIdx++;
+    for (auto i : sort_indexes(wbi)) {
+        trips.push_back(Eigen::Triplet<Scalar>(wbi[i], wvi[i], wfv[i]));
     }
+    w = DBE::SparseMatrix();  // clear the matrix
     w.setFromTriplets(trips.begin(), trips.end());
 }
 
-std::vector<std::unordered_map<int, Scalar>> DemBonesModel::get_weights() {
-    std::vector<std::unordered_map<int, Scalar>> ret;
-    for (int boneIdx = 0; boneIdx < w.outerSize(); ++boneIdx) {
-        for (Eigen::SparseMatrix<double>::InnerIterator it(w, boneIdx); it; ++it) {
-            auto weight = it.value();
-            auto vertIdx = it.row();
-            if (vertIdx > ret.size() - 1) {
-                ret.resize(vertIdx);
-            }
-            ret[vertIdx][boneIdx] = weight;
-        }
-    }
-    return ret;
+void DemBonesModel::compute() {
+    validate();
+    ingestWeights();
+    DBE::compute();
+    bool degreeRot = false;
+    computeRTB(0, lr, lt, gb, lbr, lbt, degreeRot);
+    exposeWeights();
 }

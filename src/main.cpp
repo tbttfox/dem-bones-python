@@ -73,13 +73,7 @@ PYBIND11_MODULE(_dem_bones_core, m) {
 
         // Array and vector data
         .def_readwrite("_u", &DemBonesModel::u, "Internal storage for rest verts")
-        .def_property(
-            "weights", &DemBonesModel::get_weights, &DemBonesModel::set_weights,
-            "Set the weight values in the form of a list like: list[dict[int, float]]\n"
-            "Where the list index is the vertex index, and each dictionary is the bone index\n"
-            "mapped to a weight\n"
-        )
-
+        .def_readwrite("_v", &DemBonesModel::v, "Internal storage for animated verts")
         .def_readwrite("lockW", &DemBonesModel::lockW, "The lock percent of each vertex")
         .def_readwrite("_m", &DemBonesModel::m, "The bone transformations")
         .def_readwrite("lockM", &DemBonesModel::lockM, "The bone transformations lock control")
@@ -91,6 +85,10 @@ PYBIND11_MODULE(_dem_bones_core, m) {
         .def_readwrite("_preMulInv", &DemBonesModel::preMulInv, "Inverse Pre-mult matrices")
         .def_readwrite("_rotOrder", &DemBonesModel::rotOrder, "The rotation order for each bone")
         .def_readwrite("_orient", &DemBonesModel::orient, "The orientation of each bone")
+
+        .def_readwrite("_wvi", &DemBonesModel::wvi, "The vertex indices of the weight values")
+        .def_readwrite("_wbi", &DemBonesModel::wbi, "The bone indices of the weight values")
+        .def_readwrite("_wfv", &DemBonesModel::wfv, "The actual weight values")
 
         .def_readonly("_lr", &DemBonesModel::lr, "Output local rotations")
         .def_readonly("_lt", &DemBonesModel::lt, "Output local translations")
