@@ -14,7 +14,7 @@ if not exist %BUILDDIR%\ (
 )
 
 if exist %BUILDDIR%\ (
-    meson compile -C %BUILDDIR%
+    meson compile -j 32 -C %BUILDDIR%
     REM Make sure to skip subprojects with eigen
     REM otherwise it'll try to install its headers
     meson install --skip-subprojects -C %BUILDDIR%

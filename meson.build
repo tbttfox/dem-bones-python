@@ -34,5 +34,6 @@ outlib = py.extension_module(
   install_dir : meson.global_source_root() / 'output_Python',
   include_directories : includes,
   cpp_args : db_compile_args,
+  cpp_pch : 'pch/db_pch.h',
   dependencies : [eigen_dep, pybind_dep, py_dep],
 )
