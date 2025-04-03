@@ -42,24 +42,25 @@ void DemBonesModel::validate() {
 
     if (lock_bones || (lockM.size() == 0)) {
         lockM.resize(nB);
-        lockM *= 0;
         if (lock_bones) {
-            lockM.array() += 1;
+            lockM.setConstant(1);
+        } else {
+            lockM.setConstant(0);
         }
     }
 
     if (lock_weights || (lockW.size() == 0)) {
         lockW.resize(nV);
-        lockW *= 0;
         if (lock_weights) {
-            lockW.array() += 1;
+            lockW.setConstant(1);
+        } else {
+            lockW.setConstant(0);
         }
     }
 
     if (parent.size() == 0) {
         parent.resize(nB);
-        parent *= 0;
-        parent.array() -= 1;
+        parent.setConstant(-1);
     }
 
     if (rotOrder.cols() == 0) {
@@ -71,7 +72,7 @@ void DemBonesModel::validate() {
 
     if (orient.cols() == 0) {
         orient.resize(3, nB);
-        orient *= 0;
+        orient.setConstant(0);
     }
 
     // fill with identity if they're unset
