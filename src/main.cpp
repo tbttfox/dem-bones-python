@@ -28,47 +28,39 @@ PYBIND11_MODULE(_dem_bones_core, m) {
 
         // Solver params
         .def_readwrite(
-            "num_iterations", &DemBonesModel::nIters, "Number of global iterations, default = 30"
+            "nIters", &DemBonesModel::nIters, "Number of global iterations, default = 30"
         )
         .def_readwrite(
-            "num_transform_iterations", &DemBonesModel::nTransIters,
+            "nTransIters", &DemBonesModel::nTransIters,
             "Number of bone transformations update iterations per global iteration, default = 5"
         )
         .def_readwrite(
-            "translation_affine", &DemBonesModel::transAffine,
+            "transAffine", &DemBonesModel::transAffine,
             "Translations affinity soft constraint, default = 10.0"
         )
         .def_readwrite(
-            "translation_affine_norm", &DemBonesModel::transAffineNorm,
+            "transAffineNorm", &DemBonesModel::transAffineNorm,
             "p-norm for bone translations affinity soft constraint, default = 4.0"
         )
         .def_readwrite(
-            "num_weight_iterations", &DemBonesModel::nWeightsIters,
+            "nWeightsIters", &DemBonesModel::nWeightsIters,
             "Number of weights update iterations per global iteration, default = 3"
         )
         .def_readwrite(
-            "max_influences", &DemBonesModel::nnz,
+            "nnz", &DemBonesModel::nnz,
             "Number of non-zero weights per vertex, default = 8"
         )
         .def_readwrite(
-            "weights_smooth", &DemBonesModel::weightsSmooth,
+            "weightsSmooth", &DemBonesModel::weightsSmooth,
             "Weights smoothness soft constraint, default = 1e-4"
         )
         .def_readwrite(
-            "weights_smooth_step", &DemBonesModel::weightsSmoothStep,
+            "weightsSmoothStep", &DemBonesModel::weightsSmoothStep,
             "Step size for the weights smoothness soft constraint, default = 1.0"
         )
         .def_readwrite(
-            "weights_epsilon", &DemBonesModel::weightEps,
+            "weightsEps", &DemBonesModel::weightEps,
             "Epsilon for weights solver, default = 1e-15"
-        )
-
-        .def_readwrite(
-            "lock_weights", &DemBonesModel::lock_weights,
-            "If weight locks are unset, then lock them all"
-        )
-        .def_readwrite(
-            "lock_bones", &DemBonesModel::lock_bones, "If bone locks are unset, then lock them all"
         )
 
         // Array and vector data

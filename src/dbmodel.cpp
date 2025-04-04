@@ -34,11 +34,15 @@ void DemBonesModel::validate() {
     nB = boneName.size();
     nF = v.rows() / 3;
 
-    // clang-format off
-        if (nV == 0){throw std::length_error("No rest pose given");}
-        if (nB == 0){throw std::length_error("No bones given");}
-        if (nF == 0){throw std::length_error("No target animation given");}
-    // clang-format on
+    if (nV == 0) {
+        throw std::length_error("No rest pose given");
+    }
+    if (nB == 0) {
+        throw std::length_error("No bones given");
+    }
+    if (nF == 0) {
+        throw std::length_error("No target animation given");
+    }
 
     if (lock_bones || (lockM.size() == 0)) {
         lockM.resize(nB);
@@ -98,20 +102,67 @@ void DemBonesModel::validate() {
         }
     }
 
-    // clang-format off
-        // Double check that everything matches
-        if (v.cols() != nV){throw std::length_error(std::format("The animation vert count ({}) doesn't match the number of verts in the rest pose ({})", v.cols(), nV));}
-        if (parent.size() != nB){throw std::length_error(std::format("The parent size ({}) doesn't match the boneName size ({})", parent.size(), nB));}
-        if (rotOrder.cols() != nB){throw std::length_error(std::format("The rotOrder size ({}) doesn't match the boneName size ({})", rotOrder.cols(), nB));}
-        if (orient.cols() != nB){throw std::length_error(std::format("the orient size ({}) doesn't match the boneName size ({})", orient.cols(), nB));}
-        if (lockM.size() != nB){throw std::length_error(std::format("The bone tranform lock size ({}) doesn't match the boneName size ({})", lockM.size(), nB));}
-        if (lockW.size() != nV){throw std::length_error(std::format("The weight lock size ({}) doesn't match the number of verts in the rest pose ({})", lockW.size(), nV));}
+    if (fTime.size() == 0){
+        fTime.resize(nF);
+        for (size_t i = 0; i< nF; ++i){
+            fTime(i) = (double)i;
+        }
+    }
 
-        if (bind.cols() != nB * 4){throw std::length_error(std::format("The bind size ({}) doesn't match the boneName size (4 * {})", bind.cols(), nB));}
-        if (preMulInv.cols() != nB * 4){throw std::length_error(std::format("The preMulInv size ({}) doesn't match the boneName size (4 * {})", preMulInv.cols(), nB));}
-        if (m.cols() != nB * 4){throw std::length_error(std::format("The m col size ({}) doesn't match the boneName size (4 * {})", m.cols(), nB));}
-        if (m.rows() != nF * 4){throw std::length_error(std::format("The m row size ({}) doesn't match the number of frames (4 * {})", m.rows(), nF));}
-    // clang-format on
+    // Double check that everything matches
+    if (v.cols() != nV) {
+        throw std::length_error(std::format(
+            "The animation vert count ({}) doesn't match the number of verts in the rest pose ({})",
+            v.cols(), nV
+        ));
+    }
+    if (parent.size() != nB) {
+        throw std::length_error(std::format(
+            "The parent size ({}) doesn't match the boneName size ({})", parent.size(), nB
+        ));
+    }
+    if (rotOrder.cols() != nB) {
+        throw std::length_error(std::format(
+            "The rotOrder size ({}) doesn't match the boneName size ({})", rotOrder.cols(), nB
+        ));
+    }
+    if (orient.cols() != nB) {
+        throw std::length_error(std::format(
+            "the orient size ({}) doesn't match the boneName size ({})", orient.cols(), nB
+        ));
+    }
+    if (lockM.size() != nB) {
+        throw std::length_error(std::format(
+            "The bone tranform lock size ({}) doesn't match the boneName size ({})", lockM.size(),
+            nB
+        ));
+    }
+    if (lockW.size() != nV) {
+        throw std::length_error(std::format(
+            "The weight lock size ({}) doesn't match the number of verts in the rest pose ({})",
+            lockW.size(), nV
+        ));
+    }
+    if (bind.cols() != nB * 4) {
+        throw std::length_error(std::format(
+            "The bind size ({}) doesn't match the boneName size (4 * {})", bind.cols(), nB
+        ));
+    }
+    if (preMulInv.cols() != nB * 4) {
+        throw std::length_error(std::format(
+            "The preMulInv size ({}) doesn't match the boneName size (4 * {})", preMulInv.cols(), nB
+        ));
+    }
+    if (m.cols() != nB * 4) {
+        throw std::length_error(std::format(
+            "The m col size ({}) doesn't match the boneName size (4 * {})", m.cols(), nB
+        ));
+    }
+    if (m.rows() != nF * 4) {
+        throw std::length_error(std::format(
+            "The m row size ({}) doesn't match the number of frames (4 * {})", m.rows(), nF
+        ));
+    }
 
     fStart.resize(nS + 1);
     fStart(0) = 0;
@@ -148,6 +199,8 @@ void DemBonesModel::ingestWeights() {
 }
 
 void DemBonesModel::compute() {
+    prevErr = -1;
+    patience_count = patience;
     validate();
     ingestWeights();
     DBE::compute();
