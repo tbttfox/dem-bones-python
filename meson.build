@@ -1,4 +1,4 @@
-project('dem-bones-python', 'cpp', default_options: ['cpp_std=c++20'], meson_version : '1.7.0')
+project('dem-bones-python', 'cpp', default_options: ['cpp_std=c++20'], meson_version : '>=1.7.0')
 
 source_files = files([
   'src/main.cpp',
@@ -24,9 +24,10 @@ if os_name == 'windows'
   db_compile_args += ['/bigobj']
 endif
 
-
 pymod = import('python')
-py = pymod.find_installation('python3')
+pyversion = get_option('pyversion')
+
+py = pymod.find_installation('python' + pyversion)
 outlib = py.extension_module(
   '_dem_bones_core',
   sources : source_files,

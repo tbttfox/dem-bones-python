@@ -1,6 +1,8 @@
 from itertools import groupby
 from maya import cmds
 from maya.api import OpenMaya as om2
+import numpy as np
+from . import DemBones
 
 
 def getMesh(name: str):
@@ -21,7 +23,7 @@ def extractAnimation(animatedMesh: str, animFrames: list):
     for i, frame in enumerate(animFrames):
         cmds.currentTime(frame)
         cmds.polyEvaluate(animatedMesh, vertex=True)  # Force update
-        mt.setValue(frame)
+        mt.value = float(frame)
         fTimes.append(mt.asUnits(mt.kSeconds))
         animData[i] = np.array(mesh.getPoints())[:, :3]
 
@@ -29,14 +31,14 @@ def extractAnimation(animatedMesh: str, animFrames: list):
     return animData, fTimes
 
 
-def extractRest(restMesh: str, restFrame: int):
+def extractRest(restMesh: str):
     mesh = getMesh(restMesh)
     return np.array(mesh.getPoints())[:, :3]
 
 
 def toRanges(idxs):
     ret = []
-    grps = groupby(enumerate(ordered), key=lambda x: x[1] - x[0])
+    grps = groupby(enumerate(idxs), key=lambda x: x[1] - x[0])
     for _, grp in grps:
         g = list(grp)
         start = g[0][1]
@@ -110,7 +112,6 @@ def getInfluenceHierarchy(cl):
         par = cmds.ls(cmds.listRelatives(j, parent=True), long=True)
         if not par:
             pars.append(-1)
-            parInvMats[i] = np.eye(4)
             continue
         par = cmds.ls(par[0], long=True)[0]
         pars.append(joints.index(par))
@@ -170,11 +171,11 @@ def mayaDemBones(
 
     # All done at rest-frame time
     topo = getTopo(restObj)
-    cl = getSkinCluster(skinnedMesh)
+    cl = getSkinCluster(skinnedTarget)
     weights = getSkinWeights(cl)
     joints, parIdxs = getInfluenceHierarchy(cl)
     rotateOrders, jointOrients, parInvMats = getJointData(joints)
-    restPts = extractRest(restObj, restFrame)
+    restPts = extractRest(restObj)
     bind = getBindMats(cl, joints)
 
     anim, fTime = extractAnimation(animObj, animFrames)
@@ -190,7 +191,7 @@ def mayaDemBones(
     solver.rotOrder = rotateOrders
     solver.orient = jointOrients
     solver.bind = bind
-    solver.preMulInv = parentInvMats
+    solver.preMulInv = parInvMats
 
     for k, v in kwargs.items():
         setattr(solver, k, v)
@@ -198,18 +199,23 @@ def mayaDemBones(
     solver.compute()
 
 
-solver = DemBones()
-mayaDemBones(
-    solver,
-    "face_skinned",
-    1001,
-    "face_shapes",
-    list(range(1001, 1053)),
-    "face_skinned",
-    patience=1000,
-    num_iterations=300,
-    num_transform_iterations=50,
-    num_weight_iterations=30,
-    max_influences=2,
-    weights_smooth=1e-8,
-)
+def test():
+    solver = DemBones()
+    mayaDemBones(
+        solver,
+        "face_skinned",
+        1001,
+        "face_shapes",
+        list(range(1001, 1053)),
+        "face_skinned",
+        patience=1000,
+        num_iterations=300,
+        num_transform_iterations=50,
+        num_weight_iterations=30,
+        max_influences=2,
+        weights_smooth=1e-8,
+    )
+
+
+if __name__ == "__main__":
+    test()

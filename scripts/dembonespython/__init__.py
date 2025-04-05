@@ -1,6 +1,4 @@
-import sys
-sys.path.insert(0, r'C:\blur\dev\GitHub\InProgress\dem-bones-python\output_Python')
-import _dem_bones_core
+from . import _dem_bones_core
 import numpy as np
 __version__ = "v0.0.1-dev"
 
@@ -118,6 +116,7 @@ class DemBones(_dem_bones_core.DemBones):
 
     @restPose.setter
     def restPose(self, pose):
+        pose = np.asarray(pose)
         if self.rowMajorPts:
             pose = pose.T
         self._u = pose
@@ -138,6 +137,7 @@ class DemBones(_dem_bones_core.DemBones):
 
     @anim.setter
     def anim(self, pose):
+        pose = np.asarray(pose)
         if self.rowMajorPts:
             pose = pose.swapaxes(-1, -2)
         self._v = pose.reshape((-1, pose.shape[-1]))
@@ -195,6 +195,7 @@ class DemBones(_dem_bones_core.DemBones):
 
     @bind.setter
     def bind(self, pose):
+        pose = np.asarray(pose)
         if not self.rowMajorMats:
             pose = pose.swapaxes(1, 2)
         self._bind = pose.reshape((-1, 4)).T
@@ -212,6 +213,7 @@ class DemBones(_dem_bones_core.DemBones):
 
     @preMulInv.setter
     def preMulInv(self, pose):
+        pose = np.asarray(pose)
         if not self.rowMajorMats:
             pose = pose.swapaxes(1, 2)
         self._preMulInv = pose.reshape((-1, 4)).T
@@ -232,13 +234,14 @@ class DemBones(_dem_bones_core.DemBones):
             array[component][bone]
         Defaults to all zeros
         """
+        val = np.asarray(val)
         if self.rowMajorPts:
             val = val.T
         self._orient = val
 
     def compute(self):
         """Compute the bone positions and new weights"""
-        super(_dem_bones_core.DemBones, self).compute()
+        super(DemBones, self).compute()
 
     @property
     def boneMats(self):
@@ -257,6 +260,7 @@ class DemBones(_dem_bones_core.DemBones):
 
     @boneMats.setter
     def boneMats(self, m):
+        m = np.asarray(m)
         if self.rowMajorMats:
             m = m.swapaxes(2, 3)
         m = m.swapaxes(1, 2)
