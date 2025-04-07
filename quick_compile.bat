@@ -1,6 +1,6 @@
 SETLOCAL
 
-SET PYTHON_VERSION=3.11
+SET PYTHON_VERSION=3.10
 REM "vs" "ninja"
 REM use VS for the debugger, otherwise use NINJA
 REM Until I figure out how to debug using nvim

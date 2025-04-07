@@ -2,6 +2,8 @@
 
 #include <algorithm>  // std::sort std::stable_sort
 #include <format>
+#include <fstream>
+#include <iostream>
 #include <numeric>  // std::iota
 
 template <typename T>
@@ -102,9 +104,9 @@ void DemBonesModel::validate() {
         }
     }
 
-    if (fTime.size() == 0){
+    if (fTime.size() == 0) {
         fTime.resize(nF);
-        for (size_t i = 0; i< nF; ++i){
+        for (size_t i = 0; i < nF; ++i) {
             fTime(i) = (double)i;
         }
     }
@@ -195,7 +197,54 @@ void DemBonesModel::ingestWeights() {
         trips.push_back(Eigen::Triplet<Scalar>(wbi[i], wvi[i], wfv[i]));
     }
     w = DBE::SparseMatrix();  // clear the matrix
+    w.resize(nB, nV);
     w.setFromTriplets(trips.begin(), trips.end());
+}
+
+#define WRITEPROP(propname)                                   \
+    {                                                         \
+        std::string filename = basename + #propname + ".txt"; \
+        std::ofstream file(filename);                         \
+        if (file.is_open()) {                                 \
+            file << propname << std::endl;                    \
+            file.close();                                     \
+        }                                                     \
+    }
+
+void DemBonesModel::exportSolver() {
+    std::string basename = "D:\\temp\\dembones_out\\maya\\";
+
+    WRITEPROP(nIters)
+    WRITEPROP(nInitIters)
+    WRITEPROP(nTransIters)
+    WRITEPROP(transAffine)
+    WRITEPROP(transAffineNorm)
+    WRITEPROP(nWeightsIters)
+    WRITEPROP(nnz)
+    WRITEPROP(weightsSmooth)
+    WRITEPROP(weightsSmoothStep)
+    WRITEPROP(weightEps)
+    WRITEPROP(nV)
+    WRITEPROP(nB)
+    WRITEPROP(nS)
+    WRITEPROP(nF)
+    WRITEPROP(fStart)
+    WRITEPROP(subjectID)
+    WRITEPROP(u)
+    WRITEPROP(w)
+    WRITEPROP(lockW)
+    WRITEPROP(m)
+    WRITEPROP(lockM)
+    WRITEPROP(v)
+    WRITEPROP(fv)
+    WRITEPROP(fTime)
+    WRITEPROP(boneName)
+    WRITEPROP(parent)
+    WRITEPROP(bind)
+    WRITEPROP(preMulInv)
+    WRITEPROP(rotOrder)
+    WRITEPROP(orient)
+    WRITEPROP(bindUpdate)
 }
 
 void DemBonesModel::compute() {
@@ -203,7 +252,10 @@ void DemBonesModel::compute() {
     patience_count = patience;
     validate();
     ingestWeights();
+
+    exportSolver(this);
     DBE::compute();
+
     bool degreeRot = false;
     computeRTB(0, lr, lt, gb, lbr, lbt, degreeRot);
     exposeWeights();

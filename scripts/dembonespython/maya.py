@@ -1,4 +1,5 @@
 from itertools import groupby
+from typing import Optional
 from maya import cmds
 from maya.api import OpenMaya as om2
 import numpy as np
@@ -148,13 +149,35 @@ def getTopo(meshName: str):
     return ret
 
 
+
+def setOutput(solver, animFrames):
+
+    m = solver.boneMats
+    n = solver.boneName
+    pmi = solver.preMulInv
+    pm = np.linalg.inv(pmi)
+    bind = solver.bind
+    bini = np.linalg.inv(bind)
+
+    outs = solver.outputTransforms
+
+
+    for i, f in enumerate(animFrames):
+        cmds.currentTime(f)
+        for j, bone in enumerate(n):
+            cmds.xform(bone, matrix=(m[i, j] @ pmi[j] @ bini[j]).flatten(), worldSpace=False)
+        cmds.setKeyframe(n)
+
+
+
+
 def mayaDemBones(
-    solver,
     restObj: str,
     restFrame: int,
     animObj: str,
     animFrames: list,
     skinnedTarget: str,
+    solver: Optional[DemBones] = None,
     **kwargs,
 ):
     """Run dembones on a maya object
@@ -167,6 +190,9 @@ def mayaDemBones(
         skinnedTarget: The pre-bound target object. Animation will
             be added directly to the bones of this object
     """
+    if solver is None:
+        solver = DemBones()
+
     cmds.currentTime(restFrame)
 
     # All done at rest-frame time
@@ -197,12 +223,11 @@ def mayaDemBones(
         setattr(solver, k, v)
 
     solver.compute()
+    return solver
 
 
 def test():
-    solver = DemBones()
-    mayaDemBones(
-        solver,
+    solver = mayaDemBones(
         "face_skinned",
         1001,
         "face_shapes",

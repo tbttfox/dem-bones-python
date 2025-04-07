@@ -1,9 +1,10 @@
+#pragma once
+#include <DemBones/DemBones.h>
 #include <DemBones/DemBonesExt.h>
 #include <DemBones/MatBlocks.h>
 
 #include <Eigen/Dense>
 #include <iostream>
-#include <unordered_map>
 #include <vector>
 
 #define LOG(str)                       \
@@ -14,7 +15,6 @@
 typedef double Scalar;
 typedef float AniMeshScalar;
 typedef Dem::DemBonesExt<Scalar, AniMeshScalar> DBE;
-typedef Eigen::Matrix4<Scalar> Matrix4;
 
 class DemBonesModel : public DBE {
    public:
@@ -31,7 +31,7 @@ class DemBonesModel : public DBE {
         clear();
     }
 
-    void clear() { Dem::DemBonesExt<Scalar, AniMeshScalar>::clear(); }
+    void clear() { DBE::clear(); }
 
     void cbIterBegin() { LOG("  iteration #" << iter); }
 
@@ -60,6 +60,8 @@ class DemBonesModel : public DBE {
     void exposeWeights();
 
     void ingestWeights();
+
+    void exportSolver();
 
    private:
     double prevErr;
