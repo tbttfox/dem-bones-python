@@ -95,14 +95,6 @@ void DemBonesModel::validate() {
             preMulInv.blk4(0, j) = Matrix4::Identity();
         }
     }
-    if ((m.cols() == 0) || (m.rows() == 0)) {
-        m.resize(nF * 4, nB * 4);
-        for (size_t j = 0; j < nB; ++j) {
-            for (size_t k = 0; k < nF; ++k) {
-                m.blk4(k, j) = Matrix4::Identity();
-            }
-        }
-    }
 
     if (fTime.size() == 0) {
         fTime.resize(nF);
@@ -155,16 +147,6 @@ void DemBonesModel::validate() {
             "The preMulInv size ({}) doesn't match the boneName size (4 * {})", preMulInv.cols(), nB
         ));
     }
-    if (m.cols() != nB * 4) {
-        throw std::length_error(std::format(
-            "The m col size ({}) doesn't match the boneName size (4 * {})", m.cols(), nB
-        ));
-    }
-    if (m.rows() != nF * 4) {
-        throw std::length_error(std::format(
-            "The m row size ({}) doesn't match the number of frames (4 * {})", m.rows(), nF
-        ));
-    }
 
     fStart.resize(nS + 1);
     fStart(0) = 0;
@@ -201,50 +183,264 @@ void DemBonesModel::ingestWeights() {
     w.setFromTriplets(trips.begin(), trips.end());
 }
 
-#define WRITEPROP(propname)                                   \
-    {                                                         \
-        std::string filename = basename + #propname + ".txt"; \
-        std::ofstream file(filename);                         \
-        if (file.is_open()) {                                 \
-            file << propname << std::endl;                    \
-            file.close();                                     \
-        }                                                     \
-    }
-
 void DemBonesModel::exportSolver() {
-    std::string basename = "D:\\temp\\dembones_out\\maya\\";
+    std::string basename = "D:\\temp\\dembones_out\\mine\\";
 
-    WRITEPROP(nIters)
-    WRITEPROP(nInitIters)
-    WRITEPROP(nTransIters)
-    WRITEPROP(transAffine)
-    WRITEPROP(transAffineNorm)
-    WRITEPROP(nWeightsIters)
-    WRITEPROP(nnz)
-    WRITEPROP(weightsSmooth)
-    WRITEPROP(weightsSmoothStep)
-    WRITEPROP(weightEps)
-    WRITEPROP(nV)
-    WRITEPROP(nB)
-    WRITEPROP(nS)
-    WRITEPROP(nF)
-    WRITEPROP(fStart)
-    WRITEPROP(subjectID)
-    WRITEPROP(u)
-    WRITEPROP(w)
-    WRITEPROP(lockW)
-    WRITEPROP(m)
-    WRITEPROP(lockM)
-    WRITEPROP(v)
-    WRITEPROP(fv)
-    WRITEPROP(fTime)
-    WRITEPROP(boneName)
-    WRITEPROP(parent)
-    WRITEPROP(bind)
-    WRITEPROP(preMulInv)
-    WRITEPROP(rotOrder)
-    WRITEPROP(orient)
-    WRITEPROP(bindUpdate)
+    {
+        std::string filename = basename + "nIters.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nIters << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nInitIters.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nInitIters << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nTransIters.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nTransIters << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "transAffine.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << transAffine << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "transAffineNorm.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << transAffineNorm << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nWeightsIters.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nWeightsIters << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nnz.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nnz << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "weightsSmooth.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << weightsSmooth << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "weightsSmoothStep.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << weightsSmoothStep << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "weightEps.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << weightEps << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nV.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nV << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nB.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nB << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nS.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nS << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "nF.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << nF << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "fStart.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << fStart << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "subjectID.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << subjectID << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "u.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << u << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "w.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << w << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "lockW.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << lockW << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "m.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << m << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "lockM.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << lockM << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "v.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << v << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "fv.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            for (const auto& f : fv) {
+                for (auto num : f) {
+                    file << num << ",";
+                }
+                file << std::endl;
+            }
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "fTime.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << fTime << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "boneName.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            for (const auto& bn : boneName) {
+                file << bn << std::endl;
+            }
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "parent.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << parent << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "bind.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << bind << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "preMulInv.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << preMulInv << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "rotOrder.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << rotOrder << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "orient.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << orient << std::endl;
+            file.close();
+        }
+    }
+    {
+        std::string filename = basename + "bindUpdate.txt";
+        std::ofstream file(filename);
+        if (file.is_open()) {
+            file << bindUpdate << std::endl;
+            file.close();
+        }
+    }
 }
 
 void DemBonesModel::compute() {
@@ -253,7 +449,7 @@ void DemBonesModel::compute() {
     validate();
     ingestWeights();
 
-    exportSolver(this);
+    //exportSolver();
     DBE::compute();
 
     bool degreeRot = false;

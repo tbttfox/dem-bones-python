@@ -1,7 +1,7 @@
 from itertools import groupby
 from typing import Optional
 from maya import cmds
-from maya.api import OpenMaya as om2
+from maya.api import OpenMaya as om2, OpenMayaAnim as oma2
 import numpy as np
 from . import DemBones
 
@@ -55,7 +55,8 @@ def toMelRange(rng):
 
 
 def getSkinCluster(skinnedMesh: str):
-    cl = cmds.ls(cmds.listHistory(skinnedMesh), type="skinCluster")
+    hist: list[str] = cmds.listHistory(skinnedMesh)
+    cl = cmds.ls(hist, type="skinCluster")
     if not cl:
         raise ValueError(f"No skin cluster found on object: {skinnedMesh}")
     return cl[0]
@@ -63,11 +64,11 @@ def getSkinCluster(skinnedMesh: str):
 
 def getSkinWeights(cl):
     weights = {}
-    ranges = toRanges(cmds.getAttr(f"{cl}.weightList", mi=True))
+    ranges = toRanges(cmds.getAttr(f"{cl}.weightList", multiIndices=True))
     for rng in ranges:
         mr = toMelRange(rng)
         vals = cmds.getAttr("{}.weightList[{}].weights".format(cl, mr))
-        boneIdxs = cmds.getAttr("{}.weightList[{}].weights".format(cl, mr), mi=True)
+        boneIdxs = cmds.getAttr("{}.weightList[{}].weights".format(cl, mr), multiIndices=True)
 
         p = 0
         for i, vIdx in enumerate(range(rng[0], rng[1] + 1)):
@@ -87,11 +88,12 @@ def getBindMats(cl, joints):
         else:
             bpm = np.array(bpm).reshape((4, 4))
         bindMats[i] = bpm
+    bindMats = np.linalg.inv(bindMats)
     return bindMats
 
 
 def getInfluenceHierarchy(cl):
-    joints = cmds.skinCluster(cl, query=True, influence=True)
+    joints: list[str] = cmds.skinCluster(cl, query=True, influence=True)
     if not joints:
         raise ValueError("Skinned target must have influences")
 
@@ -149,26 +151,47 @@ def getTopo(meshName: str):
     return ret
 
 
+def applySolution(solver: DemBones, animFrames: list, skinCls: str, skinMesh: str):
+    """Apply the solution that a solver has computed to animated joints
+    a skincluster, and a mesh
 
-def setOutput(solver, animFrames):
-
-    m = solver.boneMats
-    n = solver.boneName
-    pmi = solver.preMulInv
-    pm = np.linalg.inv(pmi)
+    Arguments:
+        solver (DemBones): A dembones solver that has been computed
+        animFrames (list): The frames to set the keys on
+        skinCls (str): The name of the skincluster node
+        skinMesh (str): The name of the skinned mesh transform
+    """
+    anim = solver.boneMats
+    bones = solver.boneName
     bind = solver.bind
-    bini = np.linalg.inv(bind)
-
-    outs = solver.outputTransforms
-
+    pmi = solver.preMulInv
 
     for i, f in enumerate(animFrames):
         cmds.currentTime(f)
-        for j, bone in enumerate(n):
-            cmds.xform(bone, matrix=(m[i, j] @ pmi[j] @ bini[j]).flatten(), worldSpace=False)
-        cmds.setKeyframe(n)
+        for j, bone in enumerate(bones):
+            mm =  bind[j] @ anim[i, j] @ pmi[j]
+            cmds.xform(bone, matrix=mm.flatten(), worldSpace=False)
+        cmds.setKeyframe(bones)
 
+    ww = solver.weights
+    weightArray = np.zeros((len(solver.restPose), len(solver.boneName)))
+    for bidx, tt in ww.items():
+        for vidx, val in tt.items():
+            weightArray[vidx, bidx] = val
 
+    sel = om2.MSelectionList()
+    sel.add(skinCls)
+    skin_cluster_obj = sel.getDependNode(0)
+    skin_cluster_fn = oma2.MFnSkinCluster(skin_cluster_obj)
+
+    sel = om2.MSelectionList()
+    sel.add(skinMesh)
+    mesh_dag = sel.getDagPath(0)
+    mesh_dag.extendToShape()
+
+    skin_cluster_fn.setWeights(
+        mesh_dag, om2.MObject(), om2.MIntArray(range(106)), om2.MDoubleArray(weightArray.flatten())
+    )
 
 
 def mayaDemBones(
@@ -213,7 +236,7 @@ def mayaDemBones(
     solver.boneName = joints
     solver.parent = parIdxs
     solver.weights = weights
-    solver.lockW = np.ones(len(restPts))
+    solver.lockW = np.zeros(len(restPts))  # leave it unlocked
     solver.rotOrder = rotateOrders
     solver.orient = jointOrients
     solver.bind = bind
@@ -223,6 +246,8 @@ def mayaDemBones(
         setattr(solver, k, v)
 
     solver.compute()
+
+    applySolution(solver, animFrames, cl, skinnedTarget)
     return solver
 
 
