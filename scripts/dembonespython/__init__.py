@@ -1,6 +1,12 @@
 from . import _dem_bones_core
 import numpy as np
+from numpy import typing as npt
+from typing import Literal
+
 __version__ = "v0.0.1-dev"
+
+
+RORD = Literal["xyz", "yzx", "zxy", "xzy", "yxz", "zyx"]
 
 
 class DemBones(_dem_bones_core.DemBones):
@@ -98,11 +104,11 @@ class DemBones(_dem_bones_core.DemBones):
 
     def __init__(self, rowMajorMats=True, rowMajorPts=True):
         super(DemBones, self).__init__()
-        self.rowMajorMats = rowMajorMats
-        self.rowMajorPts = rowMajorPts
+        self.rowMajorMats: bool = rowMajorMats
+        self.rowMajorPts: bool = rowMajorPts
 
     @property
-    def restPose(self):
+    def restPose(self) -> np.ndarray:
         """Required. The rest vertex positions numpy array as:
         if self.rowMajorPts:
             array[vertIdx][component]
@@ -115,14 +121,14 @@ class DemBones(_dem_bones_core.DemBones):
         return ret
 
     @restPose.setter
-    def restPose(self, pose):
+    def restPose(self, pose: npt.ArrayLike):
         pose = np.asarray(pose)
         if self.rowMajorPts:
             pose = pose.T
         self._u = pose
 
     @property
-    def anim(self):
+    def anim(self) -> np.ndarray:
         """Required. The vertex animation numpy array as:
         if self.rowMajorPts:
             array[frame][vertIdx][component]
@@ -136,31 +142,36 @@ class DemBones(_dem_bones_core.DemBones):
         return ret
 
     @anim.setter
-    def anim(self, pose):
+    def anim(self, pose: npt.ArrayLike):
         pose = np.asarray(pose)
         if self.rowMajorPts:
             pose = pose.swapaxes(-1, -2)
         self._v = pose.reshape((-1, pose.shape[-1]))
 
     @property
-    def rotOrder(self):
+    def rotOrder(self) -> list[RORD]:
         """The rotation order list stored as ["xyz", "yzx", ...]
         Defaults to all ["xyz"]
         """
-        ary = self._rotOrder.T.flatten().tolist()
-        axes = "xyz"
-        ret = "".join(axes[r] for r in ary)
-        return [ret[i : i + 3] for i in range(0, len(ret), 3)]
+        dd: dict[tuple, RORD] = {
+            (0, 1, 2): "xyz",
+            (1, 2, 0): "yzx",
+            (2, 0, 1): "zxy",
+            (0, 2, 1): "xzy",
+            (1, 0, 2): "yxz",
+            (2, 1, 0): "zyx",
+        }
+        return [dd[tuple(row)] for row in self._rotOrder.T]
 
     @rotOrder.setter
-    def rotOrder(self, pose):
-        pose = "".join(pose).lower()
+    def rotOrder(self, pose: list[RORD]):
+        flat = "".join(pose).lower()
         off = ord("x")
-        pose = np.array([ord(p) - off for p in pose], dtype="i1")
-        self._rotOrder = pose.reshape((-1, 3)).T
+        ary = np.array([ord(p) - off for p in flat], dtype="i1")
+        self._rotOrder = ary.reshape((-1, 3)).T
 
     @property
-    def weights(self):
+    def weights(self) -> dict[int, dict[int, float]]:
         """The per-vertex per-bone weights:
         dict[vertIdx, dict[boneIdx, weightValue]]
         """
@@ -170,7 +181,7 @@ class DemBones(_dem_bones_core.DemBones):
         return ret
 
     @weights.setter
-    def weights(self, pose):
+    def weights(self, pose: dict[int, dict[int, float]]):
         wvi, wbi, wfv = [], [], []
         for vi, bdict in pose.items():
             for bi, w in bdict.items():
@@ -183,7 +194,7 @@ class DemBones(_dem_bones_core.DemBones):
         self._wfv = np.array(wfv, dtype=np.float64)
 
     @property
-    def bind(self):
+    def bind(self) -> np.ndarray:
         """The bind-pose matrices as a numpy array
         array[boneIdx] = 4*4 matrix
         Defaults to all identity matrices
@@ -194,14 +205,14 @@ class DemBones(_dem_bones_core.DemBones):
         return b
 
     @bind.setter
-    def bind(self, pose):
+    def bind(self, pose: npt.ArrayLike):
         pose = np.asarray(pose)
         if not self.rowMajorMats:
             pose = pose.swapaxes(1, 2)
         self._bind = pose.reshape((-1, 4)).T
 
     @property
-    def preMulInv(self):
+    def preMulInv(self) -> np.ndarray:
         """The bind-pose matrices as a numpy array
         array[boneIdx] = 4*4 matrix
         Defaults to all identity matrices
@@ -212,21 +223,21 @@ class DemBones(_dem_bones_core.DemBones):
         return b
 
     @preMulInv.setter
-    def preMulInv(self, pose):
+    def preMulInv(self, pose: npt.ArrayLike):
         pose = np.asarray(pose)
         if not self.rowMajorMats:
             pose = pose.swapaxes(1, 2)
         self._preMulInv = pose.reshape((-1, 4)).T
 
     @property
-    def orient(self):
+    def orient(self) -> np.ndarray:
         ret = self._orient
         if self.rowMajorPts:
             ret = ret.T
         return ret
 
     @orient.setter
-    def orient(self, val):
+    def orient(self, val: npt.ArrayLike):
         """The maya-style joint orient for each bone
         if self.rowMajorPts:
             array[bone][component]
@@ -244,7 +255,7 @@ class DemBones(_dem_bones_core.DemBones):
         super(DemBones, self).compute()
 
     @property
-    def boneMats(self):
+    def boneMats(self) -> np.ndarray:
         """The bone animation data
         array[frame][boneIdx] = 4*4 matrix
         Defaults to all identity matrices
@@ -259,7 +270,7 @@ class DemBones(_dem_bones_core.DemBones):
         return m
 
     @boneMats.setter
-    def boneMats(self, m):
+    def boneMats(self, m: npt.ArrayLike):
         m = np.asarray(m)
         if self.rowMajorMats:
             m = m.swapaxes(2, 3)
@@ -268,7 +279,7 @@ class DemBones(_dem_bones_core.DemBones):
         self._m = m
 
     @property
-    def outputTransforms(self):
+    def outputTransforms(self) -> dict[str, np.ndarray]:
         """Get the extended output transform data
         if self.rowMajorPts:
             return {

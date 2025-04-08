@@ -1,12 +1,13 @@
 from itertools import groupby
-from typing import Optional
+from typing import Optional, Union
 from maya import cmds
 from maya.api import OpenMaya as om2, OpenMayaAnim as oma2
 import numpy as np
-from . import DemBones
+from . import DemBones, RORD
 
 
-def getMesh(name: str):
+def getMFnMesh(name: str) -> om2.MFnMesh:
+    """Get the MFnMesh of a given transform object extended to its shape"""
     selectionList = om2.MSelectionList()
     selectionList.add(name)
     dp = selectionList.getDagPath(0)
@@ -15,29 +16,40 @@ def getMesh(name: str):
     return mfm
 
 
-def extractAnimation(animatedMesh: str, animFrames: list):
+def extractAnimation(animatedMesh: str, animFrames: list[Union[int, float]]) -> np.ndarray:
+    """Get the vertex positions of the given mesh on the given frames"""
     curtime = cmds.currentTime(query=True)
-    fTimes = []  # The time in seconds
     mt = om2.MTime()
-    mesh = getMesh(animatedMesh)
+    mesh = getMFnMesh(animatedMesh)
     animData = np.empty((len(animFrames), mesh.numVertices, 3))
     for i, frame in enumerate(animFrames):
         cmds.currentTime(frame)
         cmds.polyEvaluate(animatedMesh, vertex=True)  # Force update
         mt.value = float(frame)
-        fTimes.append(mt.asUnits(mt.kSeconds))
         animData[i] = np.array(mesh.getPoints())[:, :3]
 
     cmds.currentTime(curtime)
-    return animData, fTimes
+    return animData
 
 
-def extractRest(restMesh: str):
-    mesh = getMesh(restMesh)
+def getTimeData(animFrames: list[Union[int, float]]) -> list[float]:
+    """Get the time-in-seconds value for each frame in the list"""
+    fTimes = []
+    mt = om2.MTime()
+    for frame in animFrames:
+        mt.value = float(frame)
+        fTimes.append(mt.asUnits(mt.kSeconds))
+    return fTimes
+
+
+def extractRest(restMesh: str) -> np.ndarray:
+    """Get the rest point positions"""
+    mesh = getMFnMesh(restMesh)
     return np.array(mesh.getPoints())[:, :3]
 
 
-def toRanges(idxs):
+def toRanges(idxs: list[Union[int, float]]) -> list[tuple[int, int]]:
+    """Convert a flat list of numbers to list of inclusive ranges"""
     ret = []
     grps = groupby(enumerate(idxs), key=lambda x: x[1] - x[0])
     for _, grp in grps:
@@ -48,13 +60,15 @@ def toRanges(idxs):
     return ret
 
 
-def toMelRange(rng):
+def toMelRange(rng: tuple[int, int]) -> str:
+    """Turn the inclusive range into a mel-compatible range"""
     if rng[0] == rng[1]:
         return str(rng[0])
     return f"{rng[0]}:{rng[1]}"
 
 
-def getSkinCluster(skinnedMesh: str):
+def getSkinCluster(skinnedMesh: str) -> str:
+    """Get the skincluster from the history of the given mesh transform"""
     hist: list[str] = cmds.listHistory(skinnedMesh)
     cl = cmds.ls(hist, type="skinCluster")
     if not cl:
@@ -62,7 +76,8 @@ def getSkinCluster(skinnedMesh: str):
     return cl[0]
 
 
-def getSkinWeights(cl):
+def getSkinWeights(cl: str) -> dict[int, dict[int, float]]:
+    """Get the skin weights as a dictionary"""
     weights = {}
     ranges = toRanges(cmds.getAttr(f"{cl}.weightList", multiIndices=True))
     for rng in ranges:
@@ -79,9 +94,10 @@ def getSkinWeights(cl):
     return weights
 
 
-def getBindMats(cl, joints):
+def getBindMats(cl: str, joints: list[str]) -> np.ndarray:
+    """Get the bind matrices for the given joints"""
     bindMats = np.zeros((len(joints), 4, 4))
-    for i, j in enumerate(joints):
+    for i in range(len(joints)):
         bpm = cmds.getAttr(f"{cl}.bindPreMatrix[{i}]")
         if not bpm:
             bpm = np.eye(4)
@@ -92,8 +108,9 @@ def getBindMats(cl, joints):
     return bindMats
 
 
-def getInfluenceHierarchy(cl):
-    joints: list[str] = cmds.skinCluster(cl, query=True, influence=True)
+def getInfluenceHierarchy(cl: str) -> tuple[list[str], list[Union[int, float]]]:
+    """Get the DemBones compatible hierarchy of the joints in the given skincluster"""
+    joints: Optional[list[str]] = cmds.skinCluster(cl, query=True, influence=True)
     if not joints:
         raise ValueError("Skinned target must have influences")
 
@@ -111,7 +128,7 @@ def getInfluenceHierarchy(cl):
 
     joints = joints + extras
     pars = []
-    for i, j in enumerate(joints):
+    for j in joints:
         par = cmds.ls(cmds.listRelatives(j, parent=True), long=True)
         if not par:
             pars.append(-1)
@@ -121,26 +138,32 @@ def getInfluenceHierarchy(cl):
     return joints, pars
 
 
-def getJointData(joints):
+def getRotateOrders(joints: list[str]) -> list[RORD]:
+    """Get the rotate orders for the list of joints"""
     roIdxs = ["xyz", "yzx", "zxy", "xzy", "yxz", "zyx"]
-    ros = []
+    return [roIdxs[cmds.getAttr(f"{j}.rotateOrder")] for j in joints]
+
+
+def getParentInverseMatrces(joints: list[str]) -> np.ndarray:
+    """Get the ParentInverseMatrices for the list of joints"""
+    pims = [cmds.getAttr(f"{j}.parentInverseMatrix[0]") for j in joints]
+    return np.array(pims).reshape((-1, 4, 4))
+
+
+def getJointOrients(joints: list[str]) -> list[tuple[float, float, float]]:
+    """Get the joint orient values for the list of joints"""
     jos = []
-    pims = []
     for j in joints:
-        ros.append(roIdxs[cmds.getAttr(f"{j}.rotateOrder")])
+        v = (0.0, 0.0, 0.0)
         if cmds.nodeType(j) == "joint":
-            jos.extend(cmds.getAttr(f"{j}.jointOrient"))
-        else:
-            jos.append((0.0, 0.0, 0.0))
-
-        pims.append(cmds.getAttr(f"{j}.parentInverseMatrix[0]"))
-
-    pims = np.array(pims).reshape((-1, 4, 4))
-    return ros, jos, pims
+            v = cmds.getAttr(f"{j}.jointOrient")[0]
+        jos.append(v)
+    return jos
 
 
-def getTopo(meshName: str):
-    mesh = getMesh(meshName)
+def getTopo(meshName: str) -> list[list[Union[int, float]]]:
+    """Get the demBones compatible topology data for the given mesh"""
+    mesh = getMFnMesh(meshName)
     counts, connects = mesh.getVertices()
     connects = list(connects)
     ret = []
@@ -151,33 +174,29 @@ def getTopo(meshName: str):
     return ret
 
 
-def applySolution(solver: DemBones, animFrames: list, skinCls: str, skinMesh: str):
-    """Apply the solution that a solver has computed to animated joints
-    a skincluster, and a mesh
-
-    Arguments:
-        solver (DemBones): A dembones solver that has been computed
-        animFrames (list): The frames to set the keys on
-        skinCls (str): The name of the skincluster node
-        skinMesh (str): The name of the skinned mesh transform
-    """
-    anim = solver.boneMats
+def applyBoneTransforms(solver: DemBones, animFrames: list[Union[int, float]]):
+    """Apply transforms to the bones stored by the solver"""
     bones = solver.boneName
-    bind = solver.bind
-    pmi = solver.preMulInv
+    allmats = solver.bind[None] @ solver.boneMats @ solver.preMulInv[None]
 
+    curtime = cmds.currentTime(query=True)
     for i, f in enumerate(animFrames):
         cmds.currentTime(f)
         for j, bone in enumerate(bones):
-            mm =  bind[j] @ anim[i, j] @ pmi[j]
-            cmds.xform(bone, matrix=mm.flatten(), worldSpace=False)
+            cmds.xform(bone, matrix=allmats[i, j].flatten(), worldSpace=False)
         cmds.setKeyframe(bones)
+    cmds.currentTime(curtime)
 
+
+def applyWeights(solver: DemBones, skinCls: str, skinMesh: str):
+    """Set the weights stored by the solver to the given skincluster"""
     ww = solver.weights
     weightArray = np.zeros((len(solver.restPose), len(solver.boneName)))
     for bidx, tt in ww.items():
         for vidx, val in tt.items():
             weightArray[vidx, bidx] = val
+
+    bones = solver.boneName
 
     sel = om2.MSelectionList()
     sel.add(skinCls)
@@ -190,20 +209,36 @@ def applySolution(solver: DemBones, animFrames: list, skinCls: str, skinMesh: st
     mesh_dag.extendToShape()
 
     skin_cluster_fn.setWeights(
-        mesh_dag, om2.MObject(), om2.MIntArray(range(106)), om2.MDoubleArray(weightArray.flatten())
+        mesh_dag, om2.MObject(), om2.MIntArray(range(len(bones))), om2.MDoubleArray(weightArray.flatten())
     )
+
+
+def applySolution(solver: DemBones, animFrames: list[Union[int, float]], skinCls: str, skinMesh: str):
+    """Apply the solution that a solver has computed to animated joints
+    a skincluster, and a mesh
+
+    Arguments:
+        solver (DemBones): A dembones solver that has been computed
+        animFrames (list): The frames to set the keys on
+        skinCls (str): The name of the skincluster node
+        skinMesh (str): The name of the skinned mesh transform
+    """
+    applyBoneTransforms(solver, animFrames)
+    applyWeights(solver, skinCls, skinMesh)
 
 
 def mayaDemBones(
     restObj: str,
     restFrame: int,
     animObj: str,
-    animFrames: list,
+    animFrames: list[Union[int, float]],
     skinnedTarget: str,
     solver: Optional[DemBones] = None,
     **kwargs,
-):
+) -> DemBones:
     """Run dembones on a maya object
+
+    Still TODO: Add mechanisms for locking weights or transforms
 
     Arguments:
         restObj: The rest-pose object
@@ -223,11 +258,14 @@ def mayaDemBones(
     cl = getSkinCluster(skinnedTarget)
     weights = getSkinWeights(cl)
     joints, parIdxs = getInfluenceHierarchy(cl)
-    rotateOrders, jointOrients, parInvMats = getJointData(joints)
+    rotateOrders = getRotateOrders(joints)
+    parInvMats = getParentInverseMatrces(joints)
+    jointOrients = getJointOrients(joints)
+
     restPts = extractRest(restObj)
     bind = getBindMats(cl, joints)
-
-    anim, fTime = extractAnimation(animObj, animFrames)
+    fTime = getTimeData(animFrames)
+    anim = extractAnimation(animObj, animFrames)
 
     solver.restPose = restPts
     solver.anim = anim
@@ -252,7 +290,7 @@ def mayaDemBones(
 
 
 def test():
-    solver = mayaDemBones(
+    _solver = mayaDemBones(
         "face_skinned",
         1001,
         "face_shapes",
