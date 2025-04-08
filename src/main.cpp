@@ -26,6 +26,8 @@ PYBIND11_MODULE(_dem_bones_core, m) {
             "default = 3"
         )
 
+        .def_readwrite("verbose", &DemBonesModel::verbose, "Whether to print solver updates")
+
         // Solver params
         .def_readwrite(
             "nIters", &DemBonesModel::nIters, "Number of global iterations, default = 30"
@@ -47,8 +49,7 @@ PYBIND11_MODULE(_dem_bones_core, m) {
             "Number of weights update iterations per global iteration, default = 3"
         )
         .def_readwrite(
-            "nnz", &DemBonesModel::nnz,
-            "Number of non-zero weights per vertex, default = 8"
+            "nnz", &DemBonesModel::nnz, "Number of non-zero weights per vertex, default = 8"
         )
         .def_readwrite(
             "weightsSmooth", &DemBonesModel::weightsSmooth,
@@ -59,8 +60,7 @@ PYBIND11_MODULE(_dem_bones_core, m) {
             "Step size for the weights smoothness soft constraint, default = 1.0"
         )
         .def_readwrite(
-            "weightsEps", &DemBonesModel::weightEps,
-            "Epsilon for weights solver, default = 1e-15"
+            "weightsEps", &DemBonesModel::weightEps, "Epsilon for weights solver, default = 1e-15"
         )
 
         // Array and vector data

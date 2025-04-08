@@ -3,6 +3,7 @@ from typing import Optional, Union
 from maya import cmds
 from maya.api import OpenMaya as om2, OpenMayaAnim as oma2
 import numpy as np
+import time
 from . import DemBones, RORD
 
 
@@ -234,6 +235,7 @@ def mayaDemBones(
     animFrames: list[Union[int, float]],
     skinnedTarget: str,
     solver: Optional[DemBones] = None,
+    verbose: bool = False,
     **kwargs,
 ) -> DemBones:
     """Run dembones on a maya object
@@ -279,11 +281,16 @@ def mayaDemBones(
     solver.orient = jointOrients
     solver.bind = bind
     solver.preMulInv = parInvMats
+    solver.verbose = verbose
 
     for k, v in kwargs.items():
         setattr(solver, k, v)
 
+    start = time.time()
     solver.compute()
+    end = time.time()
+    if verbose:
+        print(f"Solve took: {end - start}s")
 
     applySolution(solver, animFrames, cl, skinnedTarget)
     return solver

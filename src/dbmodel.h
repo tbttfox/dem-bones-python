@@ -2,15 +2,12 @@
 #include <DemBones/DemBones.h>
 #include <DemBones/DemBonesExt.h>
 #include <DemBones/MatBlocks.h>
+#include <pybind11/pybind11.h>
 
 #include <Eigen/Dense>
-#include <iostream>
+#include <format>
 #include <vector>
-
-#define LOG(str)                       \
-    {                                  \
-        std::cout << str << std::endl; \
-    }
+namespace py = pybind11;
 
 typedef double Scalar;
 typedef float AniMeshScalar;
@@ -20,6 +17,7 @@ class DemBonesModel : public DBE {
    public:
     double tolerance;
     int patience;
+    bool verbose = false;
     bool lock_weights = false;
     bool lock_bones = false;
     DBE::MatrixX lr, lt, gb, lbr, lbt;
@@ -33,7 +31,11 @@ class DemBonesModel : public DBE {
 
     void clear() { DBE::clear(); }
 
-    void cbIterBegin() { LOG("  iteration #" << iter); }
+    void cbIterBegin() {
+        if (verbose) {
+            py::print(std::format("  iteration #{}", iter));
+        }
+    }
 
     bool cbIterEnd();
 
@@ -43,11 +45,19 @@ class DemBonesModel : public DBE {
 
     void cbWeightsBegin() {}
 
-    void cbWeightsEnd() { LOG("    updated weights..."); }
+    void cbWeightsEnd() {
+        if (verbose) {
+            py::print("    updated weights...");
+        }
+    }
 
     void cbTranformationsBegin() {}
 
-    void cbTransformationsEnd() { LOG("    updated transforms..."); }
+    void cbTransformationsEnd() {
+        if (verbose) {
+            py::print("    updated transforms...");
+        }
+    }
 
     bool cbTransformationsIterEnd() { return false; }
 
