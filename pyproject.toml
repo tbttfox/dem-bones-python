@@ -41,12 +41,12 @@ artifacts = [
   "!*.lib",
 ]
 only-include = [
-    "scripts/dem-bones-python",
+    "scripts/dembonespython",
     "output_Python",
 ]
 
 [tool.hatch.version]
-path = "scripts/dem-bones-python/__init__.py"
+path = "scripts/dembonespython/__init__.py"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
