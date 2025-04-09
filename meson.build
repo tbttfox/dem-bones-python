@@ -1,4 +1,10 @@
-project('dem-bones-python', 'cpp', default_options: ['cpp_std=c++20'], meson_version : '>=1.7.0')
+project(
+  'dembonespython',
+  'cpp',
+  default_options: ['cpp_std=c++20'],
+  meson_version : '>=1.7.0',
+  version : '0.1.0',
+)
 
 source_files = files([
   'src/main.cpp',
@@ -16,24 +22,38 @@ includes = include_directories([
 eigen_dep = dependency('eigen3')
 pybind_dep = dependency('pybind11')
 py_dep = dependency('python3')
-
+omp_dep = dependency('openmp')
 
 os_name = build_machine.system()
 db_compile_args = []
+
+compiler_id = meson.get_compiler('cpp').get_id()
+
 if os_name == 'windows'
-  db_compile_args += ['/bigobj']
+  if meson.get_compiler('cpp').get_id() == 'msvc'
+    db_compile_args += ['/bigobj']
+  endif
 endif
 
 pymod = import('python')
-pyversion = get_option('pyversion')
+py = pymod.find_installation(pure:false)
 
-py = pymod.find_installation('python' + pyversion)
+if py.language_version().version_compare('< 3.7')
+  error('Invalid Python version, only >= 3.7 is supported.')
+endif
+
 outlib = py.extension_module(
   '_dem_bones_core',
   sources : source_files,
+  subdir: 'dembonespython',
   install: true,
   include_directories : includes,
   cpp_args : db_compile_args,
-  cpp_pch : 'pch/db_pch.h',
-  dependencies : [eigen_dep, pybind_dep, py_dep],
+  dependencies : [omp_dep, eigen_dep, pybind_dep, py_dep],
+)
+
+py.install_sources(
+  'dembonespython/__init__.py',
+  'dembonespython/maya.py',
+  subdir: 'dembonespython',
 )

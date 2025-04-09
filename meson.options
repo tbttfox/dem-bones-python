@@ -1,1 +1,0 @@
-option('pyversion', type:'string', value:'3', description: 'The python version to compile against')

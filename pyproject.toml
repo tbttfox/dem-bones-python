@@ -32,30 +32,8 @@ requires = [
     "pybind11>=2.13.2",
 ]
 
-
-
-
-
-
-[tool.hatch.build.targets.wheel.force-include]
-"my_compiled_library.so" = "output_Python/_dem_bones_core.*"
-
-[tool.hatch.build.targets.wheel]
-packages = ["scripts/dembonespython"]
-artifacts = [
-  "*.so",
-  "*.pyd",
-  "!*.lib",
-]
-
-[tool.hatch.version]
-path = "scripts/dembonespython/__init__.py"
-
-
-
-
-
-
+[tool.meson-python.args]
+install = ['--skip-subprojects']
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
