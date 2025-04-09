@@ -32,7 +32,6 @@ outlib = py.extension_module(
   '_dem_bones_core',
   sources : source_files,
   install: true,
-  install_dir : meson.global_source_root() / 'output_Python',
   include_directories : includes,
   cpp_args : db_compile_args,
   cpp_pch : 'pch/db_pch.h',
