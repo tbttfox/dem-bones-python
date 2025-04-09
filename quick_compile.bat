@@ -12,7 +12,7 @@ SET BUILDDIR=pybuild_%BUILDTYPE%_Py%PYTHON_VERSION:.=%_%BACKEND%
 SET MESON="C:\Program Files\Python%PYTHON_VERSION:.=%\Scripts\meson.exe"
 
 IF NOT EXIST %BUILDDIR%\ (
-    %MESON% setup %BUILDDIR% -Dpyversion=%PYTHON_VERSION% --buildtype %BUILDTYPE% --vsenv --backend %BACKEND%
+    %MESON% setup %BUILDDIR% --buildtype %BUILDTYPE% --vsenv --backend %BACKEND%
 )
 
 IF EXIST %BUILDDIR%\ (

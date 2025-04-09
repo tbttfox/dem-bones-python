@@ -16,12 +16,12 @@ std::vector<size_t> sort_indexes(const std::vector<T>& v) {
 
 bool DemBonesModel::cbIterEnd() {
     double err = rmse();
-    py::print(std::format("    rmse = {}", err));
+    nb::print(std::format("    rmse = {}", err).c_str());
 
     if ((err < prevErr * (1 + weightEps)) && ((prevErr - err) < tolerance * prevErr)) {
         patience_count--;
         if (patience_count == 0) {
-            py::print("  convergence is reached");
+            nb::print("  convergence is reached");
             return true;
         }
     } else {

@@ -2,12 +2,12 @@
 #include <DemBones/DemBones.h>
 #include <DemBones/DemBonesExt.h>
 #include <DemBones/MatBlocks.h>
-#include <pybind11/pybind11.h>
+#include <nanobind/nanobind.h>
 
 #include <Eigen/Dense>
 #include <format>
 #include <vector>
-namespace py = pybind11;
+namespace nb = nanobind;
 
 typedef double Scalar;
 typedef float AniMeshScalar;
@@ -33,7 +33,7 @@ class DemBonesModel : public DBE {
 
     void cbIterBegin() {
         if (verbose) {
-            py::print(std::format("  iteration #{}", iter));
+            nb::print(std::format("  iteration #{}", iter).c_str());
         }
     }
 
@@ -47,7 +47,7 @@ class DemBonesModel : public DBE {
 
     void cbWeightsEnd() {
         if (verbose) {
-            py::print("    updated weights...");
+            nb::print("    updated weights...");
         }
     }
 
@@ -55,7 +55,7 @@ class DemBonesModel : public DBE {
 
     void cbTransformationsEnd() {
         if (verbose) {
-            py::print("    updated transforms...");
+            nb::print("    updated transforms...");
         }
     }
 
