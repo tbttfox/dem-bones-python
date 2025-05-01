@@ -20,20 +20,14 @@ includes = include_directories([
 ])
 
 eigen_dep = dependency('eigen3')
-#pybind_dep = dependency('pybind11')
 nanobind_dep = dependency('nanobind')
 py_dep = dependency('python3')
 omp_dep = dependency('openmp')
 
-os_name = build_machine.system()
 db_compile_args = []
-
 compiler_id = meson.get_compiler('cpp').get_id()
-
-if os_name == 'windows'
-  if meson.get_compiler('cpp').get_id() == 'msvc'
-    db_compile_args += ['/bigobj']
-  endif
+if compiler_id == 'msvc'
+  db_compile_args += ['/bigobj']
 endif
 
 pymod = import('python')
@@ -41,6 +35,14 @@ py = pymod.find_installation(pure:false)
 
 if py.language_version().version_compare('< 3.8')
   error('Invalid Python version, only >= 3.8 is supported.')
+endif
+
+# Compile for the limited api in python 3.12+
+lapi = ''
+if py.language_version().version_compare('>= 3.12')
+  if get_option('buildtype') != 'debug'
+    lapi = '3.12'
+  endif
 endif
 
 outlib = py.extension_module(
@@ -51,6 +53,7 @@ outlib = py.extension_module(
   include_directories : includes,
   cpp_args : db_compile_args,
   dependencies : [omp_dep, eigen_dep, nanobind_dep, py_dep],
+  limited_api : lapi,
 )
 
 py.install_sources(
